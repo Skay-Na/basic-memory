@@ -38,11 +38,20 @@ projects on the same machine. Repo-specific memory routing still comes from each
 
 ## Iteration Loop
 
-Pin both hook scripts to the Basic Memory revision under test:
+Pin both hook scripts to the Basic Memory revision under test. The default
+repository is the official project; pass the fork URL when testing customized
+runtime code:
 
 ```bash
 just set-codex-hook-version "$(git rev-parse origin/main)"
+# For this fork, after its runtime commit has been pushed:
+just set-codex-hook-version "$(git rev-parse HEAD)" \
+  "https://github.com/<owner>/basic-memory"
 ```
+
+For deployable fork changes, use a pushed commit SHA, then commit and push the
+updated PEP 723 metadata in both hook scripts. This keeps plugin source and
+runtime source aligned for anyone installing from the fork.
 
 After changing files in `plugins/codex`, run the local checks:
 

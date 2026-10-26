@@ -1,5 +1,7 @@
 # Basic Memory for Codex
 
+中文维护者部署说明：[从 GitHub fork 部署 Codex 插件](../../docs/codex-fork-deployment-zh.md)。
+
 Basic Memory for Codex is the Codex-native bridge between a working coding thread
 and Basic Memory's durable knowledge graph.
 
@@ -83,7 +85,11 @@ The hook scripts carry no logic: the brief, checkpoint prompting, and
 lifecycle-event capture all live in the pinned Basic Memory revision behind
 `bm hook`. Each is a self-contained PEP 723 script pinned to a Basic Memory Git
 ref. All refs are updated together with
-`just set-codex-hook-version <sha-or-tag>`.
+`just set-codex-hook-version <sha-or-tag> [repository]`. The default repository
+is the official `basicmachines-co/basic-memory` project, which is appropriate
+for upstream releases. A fork that changes hook runtime behavior must pin both
+scripts to a commit available in that fork; installing the fork's plugin files
+alone does not change a runtime already pinned to upstream.
 
 ## Requirements
 
@@ -156,7 +162,35 @@ Codex CLI. Use `--dry-run` to preview the commands or `--yes` to skip confirmati
 For a local checkout, run `bm install codex --source /path/to/basic-memory`.
 The source must be the repository root containing `.agents/plugins/marketplace.json`.
 The default Git source uses its default branch, independently of the installed
-Basic Memory Python version. Hooks require `uv` as described above.
+Basic Memory Python version. This installs the plugin files (including skills
+and hook launchers); the launchers install the Basic Memory runtime from the Git
+ref embedded in each script. Hooks require `uv` as described above.
+
+### Deploying a fork with customized Codex hooks
+
+To reproduce a fork's Codex behavior, publish the fork commit containing the
+hook implementation first. Then, from that checkout, pin both hook launchers to
+the exact pushed commit SHA and the fork repository:
+
+```bash
+just set-codex-hook-version "$(git rev-parse HEAD)" \
+  "https://github.com/<owner>/basic-memory"
+git diff -- plugins/codex/hooks/session_start.py plugins/codex/hooks/pre_compact.py
+```
+
+Commit and push the resulting launcher metadata along with the plugin and hook
+changes. Deployers can then install the plugin from that fork's default branch:
+
+```bash
+bm install codex --source https://github.com/<owner>/basic-memory
+```
+
+The marketplace installation and the hook runtime are separate version
+boundaries: the former selects plugin files from the fork's default branch;
+the latter selects the exact Basic Memory commit embedded in both hook scripts.
+Using a commit SHA makes runtime selection reproducible. A deployer still needs
+their own Basic Memory project, credentials and Codex approval/trust settings;
+those personal values are not stored in the repository.
 
 Alternatively, install directly from the Basic Memory repository root:
 

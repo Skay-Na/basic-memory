@@ -9,8 +9,8 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).with_name("pre_compact.py")
 GIT_DEPENDENCY_RE = re.compile(
-    r'"basic-memory @ git\+https://github\.com/'
-    r'basicmachines-co/basic-memory@([^"]+)"'
+    r'"basic-memory @ git\+https://github\.com/[^/]+/'
+    r'basic-memory@([^"]+)"'
 )
 
 

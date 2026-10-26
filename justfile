@@ -663,9 +663,9 @@ set-version version scope="all":
 # Pin the Basic Memory Git ref used by all Codex uv hook scripts.
 # --frozen rewrites the inline metadata without resolving it: `just release` pins the
 # tag it has not pushed yet, and uv 0.13 resolves the ref on `add --script` otherwise.
-set-codex-hook-version ref:
-    uv add --script plugins/codex/hooks/session_start.py --frozen --raw "basic-memory @ git+https://github.com/basicmachines-co/basic-memory@{{ref}}"
-    uv add --script plugins/codex/hooks/pre_compact.py --frozen --raw "basic-memory @ git+https://github.com/basicmachines-co/basic-memory@{{ref}}"
+set-codex-hook-version ref repository="https://github.com/basicmachines-co/basic-memory":
+    uv add --script plugins/codex/hooks/session_start.py --frozen --raw "basic-memory @ git+{{repository}}@{{ref}}"
+    uv add --script plugins/codex/hooks/pre_compact.py --frozen --raw "basic-memory @ git+{{repository}}@{{ref}}"
 
 # Preview a version update without writing (scope: all | core | packages)
 set-version-dry-run version scope="all":

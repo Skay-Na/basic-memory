@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#     "basic-memory @ git+https://github.com/basicmachines-co/basic-memory@v0.24.1",
+#     "basic-memory @ git+https://github.com/Skay-Na/basic-memory@3168ce88addf7807a5ac14e584e3050ecb27de69",
 #     "fastmcp==4.1.3",
 # ]
 # [tool.uv]
