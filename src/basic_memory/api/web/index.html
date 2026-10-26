@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f8f7f4" />
+    <title>Basic Memory</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" id="sidebar">
+        <div class="brand">
+          <span class="brand-mark">b</span><span>basic memory</span
+          ><button
+            class="icon-button mobile-close"
+            id="close-sidebar"
+            aria-label="Close sidebar"
+            data-i18n-aria="Close sidebar"
+          >
+            ×
+          </button>
+        </div>
+        <button class="workspace-switcher" id="project-switcher">
+          <span class="workspace-avatar">M</span
+          ><span class="workspace-label"
+            ><strong id="project-name">Loading…</strong
+            ><small data-i18n="Personal workspace">Personal workspace</small></span
+          ><span class="chevron">⌄</span>
+        </button>
+        <button class="search-trigger" id="open-search">
+          <span class="search-symbol">⌕</span><span data-i18n="Search anything">Search anything</span
+          ><kbd>⌘ K</kbd>
+        </button>
+        <div class="sidebar-scroll">
+          <div class="nav-group">
+            <button class="nav-item" data-view="all">
+              <span class="nav-icon">▤</span><span data-i18n="All notes">All notes</span>
+            </button>
+            <button class="nav-item" data-view="pinned">
+              <span class="nav-icon">♢</span><span data-i18n="Pinned">Pinned</span>
+            </button>
+            <button class="nav-item" data-view="graph">
+              <span class="nav-icon">◉</span><span data-i18n="Knowledge graph">Knowledge graph</span>
+            </button>
+            <button class="nav-item" data-view="activity">
+              <span class="nav-icon">◷</span><span data-i18n="Activity">Activity</span>
+            </button>
+          </div>
+          <div class="tree-heading">
+            <span data-i18n="YOUR PROJECT">YOUR PROJECT</span
+            ><button
+              class="tiny-button"
+              id="new-folder"
+              title="Create a note in a new folder"
+              data-i18n-title="Create a note in a new folder"
+            >
+              +
+            </button>
+          </div>
+          <div id="folder-tree" class="folder-tree">
+            <div class="tree-loading" data-i18n="Loading folders…">Loading folders…</div>
+          </div>
+        </div>
+        <div class="sidebar-footer">
+          <div class="connection-dot"></div>
+          <span data-i18n="Local knowledge base">Local knowledge base</span
+          ><button class="language-toggle" id="language-toggle" type="button">EN</button><button class="icon-button" id="refresh" aria-label="Refresh" data-i18n-aria="Refresh">
+            ↻
+          </button>
+        </div>
+      </aside>
+
+      <main class="list-pane" id="list-pane">
+        <header class="list-header">
+          <button class="icon-button mobile-menu-button" id="list-open-sidebar" aria-label="Open navigation" data-i18n-aria="Open navigation">☰</button>
+          <div>
+            <div class="eyebrow" id="list-eyebrow" data-i18n="YOUR KNOWLEDGE">YOUR KNOWLEDGE</div>
+            <h1 id="list-title" data-i18n="All notes">All notes</h1>
+          </div>
+          <button class="primary-button compact" id="new-note">
+            <span>＋</span> <span data-i18n="New note">New note</span>
+          </button>
+        </header>
+        <div class="list-toolbar">
+          <div class="tabs">
+            <button class="tab active" data-tab="all" data-i18n="All notes">All notes</button
+            ><button class="tab" data-tab="pinned" data-i18n="Pinned">Pinned</button>
+          </div>
+          <button class="sort-button" id="sort-notes">
+            <span data-i18n="Recently updated">Recently updated</span> <span>⌄</span>
+          </button>
+        </div>
+        <div class="notes-scroll" id="note-list">
+          <div class="empty-state" data-i18n="Loading your notes…">Loading your notes…</div>
+        </div>
+        <div class="list-footer">
+          <span id="note-count"> </span
+          ><span class="footer-hint" data-i18n="Markdown, always yours">Markdown, always yours</span>
+        </div>
+      </main>
+
+      <section class="detail-pane" id="detail-pane">
+        <div class="welcome-state" id="welcome-state">
+          <div class="welcome-orbit"><span>✳</span><i></i><i></i><i></i></div>
+          <p class="eyebrow" data-i18n="A SPACE FOR WHAT MATTERS">A SPACE FOR WHAT MATTERS</p>
+          <h2 data-i18n-html="Your thoughts, connected.">Your thoughts,<br />connected.</h2>
+          <p class="welcome-copy" data-i18n="Choose a note to read, or start with a blank page. Your knowledge stays in plain Markdown files.">
+            Choose a note to read, or start with a blank page. Your knowledge
+            stays in plain Markdown files.
+          </p>
+          <button class="primary-button" id="welcome-new-note">
+            <span data-i18n="Create your first note">Create your first note</span> <span>↗</span>
+          </button>
+        </div>
+        <div class="note-workspace hidden" id="note-workspace">
+          <div class="note-topbar">
+            <button
+              class="icon-button mobile-menu-button"
+              id="open-sidebar"
+              aria-label="Open navigation"
+              data-i18n-aria="Open navigation"
+            >
+              ☰</button
+            ><button
+              class="icon-button mobile-menu-button"
+              id="open-list"
+              aria-label="Browse notes"
+              data-i18n-aria="Browse notes"
+            >
+              ▤
+            </button>
+            <div class="breadcrumbs" id="breadcrumbs"></div>
+            <div class="note-actions">
+              <span class="saved-indicator" id="save-status">Saved</span
+              ><button class="icon-button" id="pin-note" title="Pin note" data-i18n-title="Pin note">
+                ♢</button
+              ><button class="icon-button" id="more-note" title="More actions" data-i18n-title="More actions">
+                ···
+              </button>
+            </div>
+          </div>
+          <div class="editor-toolbar">
+            <div class="mode-tabs">
+              <button class="mode-tab" data-mode="rich" data-i18n="Write">Write</button
+              ><button class="mode-tab" data-mode="source" data-i18n="Source">Source</button
+              ><button class="mode-tab active" data-mode="preview" data-i18n="Preview">Preview</button>
+            </div>
+            <div class="editor-tools" id="editor-tools">
+              <button data-wrap="**" title="Bold" data-i18n-title="Bold">B</button
+              ><button data-wrap="*" title="Italic" data-i18n-title="Italic"><em>I</em></button
+              ><button data-prefix="# " title="Heading" data-i18n-title="Heading">H</button
+              ><button data-prefix="- " title="List" data-i18n-title="List">☷</button
+              ><span class="tool-divider"></span
+              ><button id="insert-link" title="Link" data-i18n-title="Link">↗</button>
+            </div>
+            <span class="markdown-label" data-i18n="MARKDOWN">MARKDOWN</span>
+          </div>
+          <div class="editor-scroll">
+            <div class="note-heading">
+              <div class="note-type" id="note-type-badge">NOTE</div>
+              <input
+                id="note-title"
+                class="note-title-input"
+                aria-label="Note title"
+                data-i18n-aria="Note title"
+              />
+            </div>
+            <textarea
+              id="note-source"
+              class="note-source"
+              spellcheck="false"
+              aria-label="Markdown source"
+              data-i18n-aria="Markdown source"
+            ></textarea>
+            <div
+              id="note-rich"
+              class="note-rich hidden"
+              contenteditable="true"
+              aria-label="Write note"
+              data-i18n-aria="Write note"
+            ></div>
+            <article
+              id="note-preview"
+              class="markdown-preview hidden"
+            ></article>
+            <section class="relations-section" id="relations-section">
+              <div class="section-label">
+                <span data-i18n="CONNECTED TO">CONNECTED TO</span> <span id="relation-count">0</span>
+              </div>
+              <div id="relations-list" class="relations-list"></div>
+            </section>
+          </div>
+          <div class="editor-footer">
+            <span id="file-path"></span><span id="word-count"></span>
+          </div>
+        </div>
+        <div class="graph-workspace hidden" id="graph-workspace">
+          <div class="panel-header">
+            <div>
+              <div class="eyebrow" data-i18n="SEE THE BIG PICTURE">SEE THE BIG PICTURE</div>
+              <h2 data-i18n="Knowledge graph">Knowledge graph</h2>
+            </div>
+            <button
+              class="icon-button"
+              id="graph-refresh"
+              aria-label="Refresh graph"
+              data-i18n-aria="Refresh graph"
+            >
+              ↻
+            </button>
+          </div>
+          <div class="graph-toolbar">
+            <span id="graph-summary" data-i18n="Notes connected by ideas">Notes connected by ideas</span
+            ><span class="graph-gesture-hint" id="graph-gesture-hint" data-i18n="Hold and drag to pan · scroll to zoom">Hold and drag to pan · scroll to zoom</span>
+            <div class="graph-tools">
+              <input id="graph-filter" placeholder="Find a note…" data-i18n-placeholder="Find a note…" />
+              <div class="graph-zoom-controls" role="group" aria-label="Graph zoom controls">
+                <button class="icon-button" id="graph-zoom-out" type="button" title="Zoom out" data-i18n-title="Zoom out" aria-label="Zoom out" data-i18n-aria="Zoom out">−</button>
+                <span id="graph-zoom-label" aria-live="polite">100%</span>
+                <button class="icon-button" id="graph-zoom-in" type="button" title="Zoom in" data-i18n-title="Zoom in" aria-label="Zoom in" data-i18n-aria="Zoom in">+</button>
+                <button class="icon-button" id="graph-zoom-reset" type="button" title="Reset zoom" data-i18n-title="Reset zoom" aria-label="Reset zoom" data-i18n-aria="Reset zoom">⌂</button>
+              </div>
+            </div>
+          </div>
+          <div id="graph-canvas" class="graph-canvas"></div>
+          <div class="graph-legend">
+            <span><i></i> <span data-i18n="Note">Note</span></span><span><i></i> <span data-i18n="Concept">Concept</span></span
+            ><span data-i18n="Lines show relationships">Lines show relationships</span>
+          </div>
+        </div>
+        <div class="activity-workspace hidden" id="activity-workspace">
+          <div class="panel-header">
+            <div>
+              <div class="eyebrow" data-i18n="YOUR WORKSPACE">YOUR WORKSPACE</div>
+              <h2 data-i18n="Recent activity">Recent activity</h2>
+            </div>
+            <button
+              class="icon-button"
+              id="activity-refresh"
+              aria-label="Refresh activity"
+              data-i18n-aria="Refresh activity"
+            >
+              ↻
+            </button>
+          </div>
+          <p class="activity-intro">
+            <span data-i18n="Recent notes and changes in your knowledge base.">Recent notes and changes in your knowledge base.</span>
+          </p>
+          <div id="activity-list" class="activity-list"></div>
+        </div>
+      </section>
+    </div>
+    <div class="toast" id="toast" role="status"></div>
+    <div class="modal-backdrop hidden" id="modal">
+      <section
+        class="search-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Search notes"
+        data-i18n-aria="Search notes"
+      >
+        <div class="modal-search-row">
+          <span>⌕</span
+          ><input
+            id="search-input"
+            placeholder="Search your notes…"
+            data-i18n-placeholder="Search your notes…"
+            autocomplete="off"
+          /><kbd>ESC</kbd>
+        </div>
+        <div class="search-scope">
+          <span data-i18n="SEARCHING IN">SEARCHING IN</span> <strong id="search-project-label">PROJECT</strong>
+        </div>
+        <div class="search-results" id="search-results">
+          <div class="search-empty" data-i18n="Type to search notes and ideas">Type to search notes and ideas</div>
+        </div>
+        <div class="modal-footer">
+          <span data-i18n="↑↓ Navigate">↑↓ Navigate</span><span data-i18n="↵ Open note">↵ Open note</span><span data-i18n="ESC Close">ESC Close</span>
+        </div>
+      </section>
+    </div>
+    <div class="menu-popover hidden" id="note-menu">
+      <button id="rename-note" data-i18n="Rename note">Rename note</button
+      ><button id="delete-note" class="danger" data-i18n="Delete note">Delete note</button>
+    </div>
+    <script src="/assets/vendor/markdown-it-15.0.2.min.js" defer></script>
+    <script src="/assets/i18n.js" defer></script>
+    <script src="/assets/app.js" defer></script>
+  </body>
+</html>

@@ -589,6 +589,7 @@ basic-memory status
 basic-memory doctor              # report project problems and the commands that fix them
 basic-memory tool edit-note ...  # CLI access to MCP tools
 basic-memory update              # check for and install updates
+basic-memory web                 # open the local browser workspace at 127.0.0.1:18888
 
 # Imports
 basic-memory import claude conversations
@@ -599,6 +600,8 @@ basic-memory import memory-json
 Routing flags (`--local` / `--cloud`) force a target when you're in mixed
 mode. Full CLI reference in the
 [docs](https://docs.basicmemory.com/reference/cli-reference?utm_source=github&utm_medium=referral&utm_campaign=readme).
+The local browser workspace uses the same projects and Markdown files; see
+[Local web app](docs/local-web-app.md) for startup and safe remote access.
 
 ## Auto-updates
 

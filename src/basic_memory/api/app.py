@@ -2,10 +2,12 @@
 
 import importlib
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
 from basic_memory import __version__ as version
@@ -102,6 +104,17 @@ app = FastAPI(
     version=version,
     lifespan=lifespan,
 )
+
+_web_assets = Path(__file__).with_name("web")
+app.mount("/assets", StaticFiles(directory=_web_assets), name="web-assets")
+
+
+async def serve_web_app() -> FileResponse:
+    """Serve the local-first notes workspace at the API root."""
+    return FileResponse(_web_assets / "index.html")
+
+
+app.add_api_route("/", serve_web_app, methods=["GET"], include_in_schema=False)
 
 
 # fastapi-redis-sdk's hit handler and response capture. Registered before the
