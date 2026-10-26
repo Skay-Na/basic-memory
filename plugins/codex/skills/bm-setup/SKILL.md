@@ -1,116 +1,76 @@
 ---
 name: bm-setup
-description: Set up Basic Memory for Codex at user or project level by mapping a Basic Memory project and seeding schemas.
+description: 在用户级或项目级为 Codex 配置 Basic Memory 项目映射并初始化所需 schema。
 ---
 
-# Basic Memory for Codex Setup
+# 配置 Codex 的 Basic Memory
 
-Set up the current repo so Codex can orient from Basic Memory and checkpoint work
-back into it. Keep the interview short, but always ask before choosing where data
-will be written.
+为当前仓库配置 Basic Memory，让 Codex 能从中获取上下文并写入工作检查点。访谈应简短，但必须先询问数据写入位置，不得擅自选择。
 
-## Preconditions
+## 前置条件
 
-Confirm Basic Memory is reachable before changing files:
+修改文件前确认 Basic Memory 可访问：
 
-1. Prefer MCP: call `bm_project(command="list")`.
-2. If MCP tools are not available, run `basic-memory --version` or `bm --version`.
-3. If neither works, stop and tell the user to install Basic Memory and connect the
-   MCP server. The plugin bundles an `.mcp.json` that starts
-   `uvx --prerelease=allow basic-memory mcp`.
-4. List available projects before the interview. Include cloud/local source,
-   workspace, qualified name, and project id when available.
+1. 优先使用 MCP：调用 `bm_project(command="list")`。
+2. MCP 不可用时，运行 `basic-memory --version` 或 `bm --version`。
+3. 两者都不可用时停止，告知用户安装 Basic Memory 并连接 MCP server。插件附带的 `.mcp.json` 会启动 `uvx --prerelease=allow basic-memory mcp`。
+4. 访谈前列出可用项目；如有，注明云端/本地来源、workspace、限定名称和 project id。
 
-## Interview
+## 访谈
 
-Ask the user to choose the project mapping. Do not infer write targets from the
-repo, default project, current directory, or previous local state.
+请用户选择项目映射。不要根据仓库、默认项目、当前目录或之前的本机状态推断写入目标。
 
-- config level: user-level `~/.codex/basic-memory.json` or project-level
-  `.codex/basic-memory.json`. Ask explicitly and recommend user level by default.
-  Project settings override user settings key by key.
-- storage mode: cloud, local, or mixed. Prefer the user's stated mode over any
-  CLI default.
-- `focus`: code/dev, research, writing, planning, or mixed.
-- `sessionProfile`: `coding` or `general`. Recommend `coding` for code/dev. For
-  mixed use, ask whether this repository should capture Git and pull-request
-  context. Do not infer `coding` merely because the current directory is a Git
-  checkout.
-- `primaryProject`: an existing Basic Memory project or a new one to create.
-- `secondaryProjects`: optional read-only projects for session-start context.
-- `teamProjects`: optional share targets for `bm-share`.
-- `captureFolder`: default `codex/<repo-dir>`, derived from the Git top-level
-  directory. Ask only when the user wants an explicit override.
-- `rememberFolder`: default `codex/remember`.
-- `placementConventions`: a short note about where decisions, tasks, and research
-  notes should land. Default decisions to `codex/decisions` so Codex-authored
-  memory stays under one tree.
-- `checkpointOnCompact`: whether post-compaction SessionStart asks Codex to run
-  `bm-checkpoint`. Default to `true`; an explicit JSON boolean `false` opts out.
-- `captureEvents`: whether to record lifecycle-event envelopes in the
-  local hook inbox. Default to `true`; an explicit JSON boolean `false` opts out.
-- MCP approvals: ask the user to choose exactly one of these two modes:
-  1. Keep Codex's default approval behavior. This requires no Codex config change.
-  2. Pre-approve eligible tools from the Basic Memory MCP server. This sets
-     `default_tools_approval_mode = "approve"` only for Basic Memory.
-  Do not offer a per-tool or write-only trust profile. Explain that server trust
-  changes Codex's approval UX but does not grant Basic Memory access to any new
-  workspace, project, or files. Codex still requires approval for tools that
-  advertise a destructive annotation, including Basic Memory's write, edit, and
-  delete tools.
+- **配置级别**：用户级 `~/.codex/basic-memory.json` 或项目级 `.codex/basic-memory.json`。明确询问，默认建议用户级。项目设置按键覆盖用户设置。
+- **存储模式**：云端、本地或混合。以用户明确选择为准，不跟随 CLI 默认值。
+- **focus**：代码/开发、研究、写作、规划或混合。
+- **sessionProfile**：`coding` 或 `general`。代码/开发建议 `coding`。混合场景下，询问此仓库是否要捕获 Git 和 PR 上下文。不能只因当前目录是 Git 仓库就推断为 `coding`。
+- **primaryProject**：现有 Basic Memory 项目，或需要新建的项目。
+- **secondaryProjects**：可选，只读地提供 SessionStart 上下文。
+- **teamProjects**：可选，供 `bm-share` 分享。
+- **captureFolder**：默认 `codex/<repo-dir>`，由 Git 顶层目录名生成。只有用户希望覆盖默认值时才询问。
+- **rememberFolder**：默认 `codex/remember`。
+- **placementConventions**：简短说明决策、任务和研究笔记应放在哪里。决策默认放 `codex/decisions`，使 Codex 写入内容集中在同一目录树下。
+- **checkpointOnCompact**：压缩后的 SessionStart 是否要求 Codex 运行 `bm-checkpoint`。默认 true；显式 JSON 布尔值 `false` 可关闭。
+- **captureEvents**：是否将生命周期事件信封记录到本地 Hook 收件箱。默认 true；显式 JSON 布尔值 `false` 可关闭。
+- **MCP 审批**：请用户从以下两种方式中明确选择一种：
+  1. 保留 Codex 默认审批方式，不更改 Codex 配置。
+  2. 预先批准 Basic Memory MCP server 的合格工具，只为 Basic Memory 设置 `default_tools_approval_mode = "approve"`。
 
-For the `coding` session profile, verify the current directory is inside a Git
-repository. Resolve a stable `repository` identifier such as `owner/name` from
-the current GitHub repository or origin remote, show it to the user, and ask for
-confirmation. Do not guess when the remote is missing or ambiguous. Explain that
-coding checkpoints store structured repository, branch, SHA, working-directory,
-and optional pull-request metadata in Basic Memory.
+不要提供按单个工具或只放行写入操作的信任方案。说明 server 信任设置会改变 Codex 的审批体验，但不会扩大 Basic Memory 对 workspace、项目或文件的访问权限。对于声明为破坏性操作的工具（包括 Basic Memory 的写入、编辑和删除），Codex 仍会要求审批。
 
-Explain the capture tradeoff before asking: enabled capture adds a local event
-trail that stays queued until `bm hook flush` archives it locally.
-It never creates knowledge-graph notes or writes to team projects. The default is enabled; an explicit JSON boolean
-`false` disables it, and malformed values fail closed.
+`coding` profile 必须确认当前目录位于 Git 仓库中。通过当前 GitHub 仓库或 origin remote 解析稳定的 `repository` 标识（例如 `owner/name`），向用户展示并征求确认。remote 缺失或不明确时不要猜测。说明 coding 检查点会把结构化仓库、分支、SHA、工作目录及可选 PR 元数据保存到 Basic Memory。
 
-If there are duplicate names, show qualified names and ask the user which one to
-use. Prefer qualified project names or project ids for cloud projects. Never pick
-between cloud and local variants without confirmation.
+询问前说明捕获的取舍：启用后会产生本地事件轨迹，直到 `bm hook flush` 才在本机归档；它不会创建知识图谱笔记，也不会写入团队项目。默认启用；显式 JSON 布尔值 `false` 可关闭，格式错误的值按关闭处理。
 
-For a new or empty project, suggest a light convention instead of creating empty
-folders. For an existing project, inspect `bm_list(path="/", project="<primaryProject>")` and a few notes before
-summarizing the real convention.
+若有重名项目，列出限定名称并询问选择。云端项目优先使用限定名称或 project id。未经确认不得在云端和本地同名项目之间代选。
 
-## Apply
+新建或空项目应建议轻量约定，而不是创建空目录。已存在的项目应先查看 `bm_list(path="/", project="<主项目>")` 和少量笔记，再总结实际约定。
 
-After confirming the plan, write the shared settings to the chosen user-level or
-project-level file:
+## 应用设置
+
+用户确认方案后，将共用设置写入所选的用户级或项目级文件：
 
 ```json
 {
   "basicMemory": {
-    "primaryProject": "<project-ref>",
+    "primaryProject": "<项目引用>",
     "secondaryProjects": [],
     "projectMode": "cloud",
     "teamProjects": {},
     "focus": "<focus>",
-    "sessionProfile": "<general-or-coding>",
+    "sessionProfile": "<general 或 coding>",
     "rememberFolder": "codex/remember",
     "recallTimeframe": "7d",
     "checkpointOnCompact": true,
     "captureEvents": true,
-    "placementConventions": "Put decisions in codex/decisions/ and work checkpoints in codex/<repo-dir>/."
+    "placementConventions": "决策放在 codex/decisions/，工作检查点放在 codex/<仓库目录名>/。"
   }
 }
 ```
 
-Omit `captureFolder` to use `codex/<repo-dir>`; persist it only for an explicit
-override. Preserve unrelated keys if the chosen file already exists. Include
-`projectMode` when the user chose cloud, local, or mixed routing. Always persist
-`checkpointOnCompact` and `captureEvents` as JSON booleans. These files are
-intentionally Codex-specific; do not write `.claude/settings.json`.
+省略 `captureFolder` 可使用 `codex/<repo-dir>`；只有用户明确覆盖时才持久化该值。若文件已存在，保留无关键。文件只供 Codex 使用；不要写入 `.claude/settings.json`。用户选择云端、本地或混合路由时，填写 `projectMode`。始终将 `checkpointOnCompact` 和 `captureEvents` 保存为 JSON 布尔值。
 
-For a user-level coding setup, omit `sessionProfile` from the shared user file and
-keep both the coding profile and confirmed repository identifier in the project
-file so neither can affect other repositories:
+用户级 coding 设置中，不要在共用用户文件写入 `sessionProfile`；将 coding profile 和确认过的仓库标识留在项目文件，避免影响其他仓库：
 
 ```json
 {
@@ -121,98 +81,54 @@ file so neither can affect other repositories:
 }
 ```
 
-For a project-level setup, add `repository` to the shared settings in that same
-project file.
+项目级 setup 则把 `repository` 加入该项目文件的共用设置。除上述用户级 coding 例外外，必须在所选文件显式保存 `sessionProfile`。只有 coding profile 才保存 `repository`，且须先获得用户确认。coding 缺少仓库标识时无法完成，因为 `coding_session` schema 要求可查询的 Git 身份字段。
 
-Persist `sessionProfile` explicitly in the chosen file, except for a user-level
-coding setup where it belongs in the project file alongside `repository`. Persist
-`repository` only for the `coding` profile, after the user confirms it. A coding
-setup is incomplete without a repository identifier because the `coding_session`
-schema requires queryable Git identity fields.
+### 应用 MCP 审批选择
 
-### Apply MCP Approval Choice
+审批配置属于 `~/.codex/config.toml`，不是 `.codex/basic-memory.json`。
 
-The approval choice belongs in `~/.codex/config.toml`, not
-`.codex/basic-memory.json`.
-
-If the user keeps Codex's default approval behavior, do not change
-`~/.codex/config.toml`.
-
-If the user chooses to pre-approve eligible Basic Memory tools, inspect the
-existing Codex configuration and identify which Basic Memory server entry is
-active:
-
-- For the marketplace plugin, use:
+- 用户保留 Codex 默认审批时，不要修改 `~/.codex/config.toml`。
+- 用户选择预先批准 Basic Memory 合格工具时，先检查现有 Codex 配置并确认当前实际使用的 server 项。
+- Marketplace 插件配置：
 
   ```toml
   [plugins."codex@basic-memory".mcp_servers.basic-memory]
   default_tools_approval_mode = "approve"
   ```
 
-- For a standalone MCP server, add the setting to its existing table:
+- 独立 MCP server 配置：
 
   ```toml
   [mcp_servers.basic-memory]
   default_tools_approval_mode = "approve"
   ```
 
-If both entries exist and the active route is unclear, ask the user which one
-Codex should use. Do not set both silently. Before editing the user-level Codex
-configuration, show the exact change and get explicit confirmation. Preserve all
-unrelated TOML keys and never create a duplicate table. If the file cannot be
-edited safely, provide the exact applicable snippet as a pending setup step.
+若两种配置都存在且无法判断活动路由，询问用户应使用哪种；不要默默同时修改。编辑用户级 Codex 配置前，先展示确切改动并获得明确确认。保留其他 TOML 键，不得创建重复表。无法安全编辑时，提供适用的配置片段作为待办步骤。
 
-This server-scoped setting reduces prompts for eligible tools without weakening
-Codex's global approval policy. It cannot suppress Codex's mandatory approval
-for MCP tools that advertise a destructive annotation, so Basic Memory writes,
-edits, and deletes may still prompt. Do not set `approval_policy = "never"` or
-change sandbox settings. Tell the user to start a new Codex thread after the
-config change. Managed organization policy may impose additional approvals.
+此 server 级设置只减少合格工具的审批提示，不会降低 Codex 的全局审批策略，也不能跳过 MCP 对破坏性工具的强制审批；Basic Memory 写入、编辑和删除仍可能要求确认。不得设置 `approval_policy = "never"` 或修改 sandbox。配置变更后请用户新建 Codex 对话。组织管理策略可能要求额外审批。
 
-## Seed Schemas
+## 初始化 schema
 
-Read the schema files from `<plugin-root>/schemas/`. This skill lives at
-`<plugin-root>/skills/bm-setup/SKILL.md`, so the schemas are two directories up.
+读取 `<plugin-root>/schemas/` 中的 schema 文件。本技能位于 `<plugin-root>/skills/bm-setup/SKILL.md`，因此 schemas 目录在向上两级的位置。
 
-Seed the session schema relevant to the selected profile into the chosen
-`primaryProject` if it does not already exist:
+若所选 `primaryProject` 尚无相关 schema，为该会话类型初始化 schema：
 
-- `coding-session.md` for `sessionProfile: coding`
-- `codex-session.md` for `sessionProfile: general`
+- `sessionProfile: coding` 使用 `coding-session.md`。
+- `sessionProfile: general` 使用 `codex-session.md`。
 
-Then seed these schemas for both profiles:
+两种 profile 都初始化 `decision.md` 和 `task.md`。这些 schema 对应 Codex 直接写入的笔记。生命周期信封不是笔记；`bm hook flush` 会在本地归档该运维轨迹，因此不需要 session 或 tool-ledger 的项目 schema。
 
-- `decision.md`
-- `task.md`
+使用 `bm_write` 写入，传入 `directory="schemas"`、`note_type="schema"`、schema frontmatter 作为 metadata、Markdown 正文作为 content。不要把 YAML frontmatter 粘贴到正文。
 
-These schemas cover notes Codex writes directly. Lifecycle envelopes are not
-notes: `bm hook flush` archives that operational trace locally, so there is no
-projected session or tool-ledger schema to seed.
+开始初始化前，重述准确目标项目。若目标不同于用户所选的主项目，或路由不明确，应先确认。
 
-Use `bm_write` with `directory="schemas"`, `note_type="schema"`, schema
-frontmatter as metadata, and the markdown body as content. Do not paste the YAML
-frontmatter into content.
+## 验证
 
-Before seeding schemas, restate the exact target project and ask for confirmation
-if it differs from the user's selected primary project or if routing is
-ambiguous.
+结束前核实项目映射：
 
-## Verify
+- 在主项目中以 page size 10 搜索 `type=schema`。coding profile 应确认有 `Coding Session` schema。
+- 配置了共享项目时，搜索其中一个项目的未关闭决策。
+- 运行 `basic-memory hook status --harness codex --project-dir <仓库根目录>`；必要时使用 `bm` 或 `uvx --prerelease=allow basic-memory`。确认找到本仓库设置，并报告所选项目、会话类型、仓库、检查点提示和捕获状态。收件箱计数由多个 harness 共享。
+- 若检查报错，修正项目引用或 Hook 启动器后再结束。
 
-Before closing, prove the mapping works:
-
-- Search the primary project for `type=schema` with page size 10. For a coding
-  setup, confirm the `Coding Session` schema is present.
-- Search one shared project for open decisions if shared projects were configured.
-- Run `basic-memory hook status --harness codex --project-dir <repo-root>` (using
-  `bm` or `uvx --prerelease=allow basic-memory` if needed). Confirm that it finds this repo's
-  settings, reports the selected project, session profile, repository, and
-  intended checkpoint-prompt and capture states.
-  Its inbox counts are shared across harnesses.
-- If any check errors, fix the project ref or hook launcher before finishing.
-
-Finish with the project mapping, schemas seeded or skipped, checkpoint prompt,
-capture choice, MCP approval mode, shared inbox status, and the verification
-result.
-Tell the user that plugin hooks need to be reviewed and trusted in Codex before
-they run.
+最后汇报项目映射、初始化或跳过的 schema、检查点提示、捕获设置、MCP 审批方式、共享收件箱状态和验证结果，并提醒用户在 Codex 中审核并信任插件 hooks 后它们才会运行。

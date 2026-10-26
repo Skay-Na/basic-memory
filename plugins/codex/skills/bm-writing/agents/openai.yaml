@@ -1,7 +1,7 @@
 interface:
-  display_name: "Memory Writing"
-  short_description: "Customize how Codex writes project memory"
+  display_name: "记忆写作规范"
+  short_description: "自定义 Codex 撰写项目记忆的方式"
   icon_small: "./assets/icon.svg"
   icon_large: "./assets/icon.svg"
   brand_color: "#2563EB"
-  default_prompt: "Use $bm-writing to write this Basic Memory note as useful project memory."
+  default_prompt: "使用 $bm-writing 将这篇 Basic Memory 笔记写成有用的项目记忆。"

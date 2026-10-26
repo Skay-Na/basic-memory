@@ -1,7 +1,7 @@
 {
   "name": "codex",
   "version": "0.24.1",
-  "description": "A Codex-native bridge to Basic Memory for durable engineering context, decisions, and resumable checkpoints.",
+  "description": "面向 Codex 的 Basic Memory 桥接插件，用于保存长期工程上下文、决策和可恢复的工作检查点。",
   "author": {
     "name": "Basic Machines",
     "email": "hello@basicmachines.co",
@@ -21,11 +21,11 @@
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
-    "displayName": "Basic Memory for Codex",
-    "shortDescription": "Carry decisions, active work, and handoffs across Codex threads",
-    "longDescription": "Use Basic Memory for Codex to orient from your durable knowledge graph, capture engineering decisions, checkpoint long-running work, and resume with repo-backed context across Codex sessions.",
+    "displayName": "Codex 的 Basic Memory",
+    "shortDescription": "在 Codex 对话间延续决策、进行中的工作和交接记录",
+    "longDescription": "使用 Codex 的 Basic Memory 从长期知识图谱获取上下文、记录工程决策、保存长期工作的检查点，并根据仓库信息在后续 Codex 会话中恢复工作。",
     "developerName": "Basic Machines",
-    "category": "Developer Tools",
+    "category": "开发工具",
     "capabilities": [
       "Interactive",
       "Read",
@@ -35,9 +35,9 @@
     "privacyPolicyURL": "https://basicmemory.com/privacy",
     "termsOfServiceURL": "https://basicmemory.com/terms",
     "defaultPrompt": [
-      "Use Basic Memory to orient before changing this repo.",
-      "Checkpoint this Codex thread into Basic Memory.",
-      "Capture the decision we just made."
+      "修改此仓库前，先从 Basic Memory 获取上下文。",
+      "将此 Codex 对话保存为 Basic Memory 工作检查点。",
+      "记录我们刚刚作出的决策。"
     ],
     "brandColor": "#2563EB",
     "composerIcon": "./assets/app-icon.png",

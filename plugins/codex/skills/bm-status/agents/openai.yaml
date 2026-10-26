@@ -1,7 +1,7 @@
 interface:
-  display_name: "Status"
-  short_description: "Check Basic Memory plugin health"
+  display_name: "检查状态"
+  short_description: "检查 Basic Memory 插件状态"
   icon_small: "./assets/icon.svg"
   icon_large: "./assets/icon.svg"
   brand_color: "#2563EB"
-  default_prompt: "Use $bm-status to report the Basic Memory for Codex configuration and health."
+  default_prompt: "使用 $bm-status 汇报 Basic Memory for Codex 的配置与运行状态。"

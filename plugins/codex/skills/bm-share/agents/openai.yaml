@@ -1,7 +1,7 @@
 interface:
-  display_name: "Share"
-  short_description: "Copy notes to configured team projects"
+  display_name: "分享笔记"
+  short_description: "将笔记复制到已配置的团队项目"
   icon_small: "./assets/icon.svg"
   icon_large: "./assets/icon.svg"
   brand_color: "#2563EB"
-  default_prompt: "Use $bm-share to share this Basic Memory note with a configured team project."
+  default_prompt: "使用 $bm-share 将这篇 Basic Memory 笔记分享至已配置的团队项目。"

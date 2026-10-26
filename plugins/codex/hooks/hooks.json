@@ -1,5 +1,5 @@
 {
-  "description": "Basic Memory for Codex hooks - orient from the graph, record local lifecycle trace, and request an authored checkpoint after compaction.",
+  "description": "Basic Memory for Codex 生命周期 Hook：从知识图谱加载上下文、记录本地事件轨迹，并在上下文压缩后提示创建检查点。",
   "hooks": {
     "SessionStart": [
       {
@@ -8,7 +8,7 @@
           {
             "type": "command",
             "command": "uv run --quiet --script \"${PLUGIN_ROOT}/hooks/session_start.py\"",
-            "statusMessage": "Loading Basic Memory context",
+            "statusMessage": "正在加载 Basic Memory 上下文",
             "timeout": 30
           }
         ]
@@ -21,7 +21,7 @@
           {
             "type": "command",
             "command": "uv run --quiet --script \"${PLUGIN_ROOT}/hooks/pre_compact.py\"",
-            "statusMessage": "Checkpointing Codex work to Basic Memory",
+            "statusMessage": "正在将 Codex 工作检查点写入 Basic Memory",
             "timeout": 60
           }
         ]

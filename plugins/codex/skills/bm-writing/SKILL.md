@@ -1,68 +1,54 @@
 ---
 name: bm-writing
-description: Apply the user-customizable writing standard for Basic Memory notes created or substantially revised by Codex. Use with bm-checkpoint, bm-decide, bm-remember, and other Basic Memory note-writing workflows.
+description: 为 Codex 创建或大幅修订的 Basic Memory 笔记应用可自定义的写作规范；与 bm-checkpoint、bm-decide、bm-remember 等技能搭配使用。
 ---
 
-# Write Useful Project Memory
+# 写出有用的项目记忆
 
-Use this shared standard whenever a Codex Basic Memory skill writes or
-substantially revises a note. This file is intentionally user-customizable: edit
-the voice, emphasis, and preferred structure here to fit how you want to remember
-your work.
+每当 Codex 的 Basic Memory 技能创建或大幅修订笔记时，都应用这份共用规范。本文件有意设计为可由用户自定义，可按个人记忆习惯调整语气、侧重点和结构。
 
-Task-specific skills still own required metadata, schemas, evidence gathering,
-and workflow. This skill shapes the note; it never overrides factual constraints.
+具体任务技能仍负责规定必要的元数据、schema、证据收集和工作流程。本技能只塑造笔记的写法，不得覆盖事实约束。
 
-## Voice
+## 语言
 
-- Write for a human or agent returning later and trying to understand what happened.
-- Be clear, direct, warm, and technically honest.
-- Prefer concrete observations over generic praise.
-- Have a point of view when the evidence supports it. It is fine to call a
-  change elegant, messy, risky, boring, or satisfying when you explain why.
-- Keep personality in service of memory, not performance.
+- 默认使用简体中文撰写标题、正文、观察项和关系说明，即使代码、产品或项目界面使用英文。
+- 保留有必要的专有名词、产品名称、代码、命令、路径、标识符和引用原文；不要为了中文化破坏其准确性。
+- 用户明确要求其他语言，或原文必须保持原样时，遵从该要求。
 
-## Tell The Story
+## 语气
 
-- Give the note a narrative spine: problem -> approach -> current state and impact.
-- Explain why the approach works, how the system or workflow changed, and why
-  that difference matters.
-- Name relevant tradeoffs, sharp edges, useful simplifications, removals, and
-  intentionally parked work.
-- Prefer exact behavior, component names, paths, and commands over phrases such
-  as "made progress" or "updated the implementation."
-- Use substantive prose for context and reasoning. Do not reduce the note to a
-  wall of bullets or a commit-by-commit changelog.
-- Name the durable lesson when one exists — the constraint discovered, the
-  boundary made explicit, the shortcut future work should avoid. That is the
-  part that turns a status report into project memory.
-- Match depth to the subject. A small remembered fact should remain small.
+- 面向日后回来了解情况的人或智能体写作。
+- 清楚、直接、友善，并保持技术上的诚实。
+- 用具体观察代替泛泛的赞美。
+- 证据充分时可以表达判断；若称某个改动优雅、杂乱、有风险、枯燥或令人满意，应说明理由。
+- 个性服务于记忆内容，不要为了表现而喧宾夺主。
 
-## Anchor The Work
+## 讲清来龙去脉
 
-- When the note records repository work, capture where that work lives: the
-  project or repo, the git branch, and the PR or issue — plus the commit sha
-  when a specific commit matters.
-- Put anchors the note's schema defines in frontmatter; record the rest as
-  observations, e.g. `- [branch] feat/bm-writing` or `- [pr] #1123`.
-- Render GitHub-backed PR, issue, and commit anchors as Markdown links when
-  their canonical URLs are verified. Keep local or unpushed SHAs as code
-  instead of constructing links that may not exist.
-- Only anchor what is relevant. A remembered fact with no repo context needs no
-  git anchors at all.
+- 按“问题 → 做法 → 当前状态与影响”组织叙述。
+- 说明做法为何有效、系统或流程发生了什么变化，以及变化的意义。
+- 记录相关权衡、边界情况、有用的简化、移除内容和明确暂缓的工作。
+- 使用准确的行为、组件名、路径和命令，避免“取得进展”“更新了实现”等空泛表述。
+- 用有实质内容的文字说明背景和理由；不要只堆项目符号或逐次提交记录。
+- 若有长期有效的经验，写明发现的约束、明确的边界，以及未来应避免的捷径。这能让状态记录成为真正的项目记忆。
+- 内容深度应与主题匹配；简短事实仍应简短。
 
-## Preserve The Semantic Layer
+## 标明工作出处
 
-- Distill durable facts under `## Observations` as `- [category] fact`.
-- Record decisions as `[decision]` observations, not plain bullets in a separate
-  Decisions section.
-- Put graph edges under `## Relations` using `- relation_type [[Target Note]]`.
-  Never represent a relation as an observation such as `[relates_to]`.
-- Add relations when they clarify context; do not manufacture targets merely to
-  make a note look connected.
+- 笔记涉及仓库工作时，记录其项目或仓库、Git 分支、PR 或议题；特定提交很重要时也记录 commit SHA。
+- schema 定义的锚点放入 frontmatter；其他信息写成观察项，例如 `- [branch] feat/bm-writing` 或 `- [pr] #1123`。
+- 只有在确认了规范 URL 后，才把 GitHub 上的 PR、议题和提交写成 Markdown 链接。本地或尚未推送的 SHA 应作为代码文本，不要构造可能不存在的链接。
+- 只记录相关锚点。与仓库无关的事实不需要 Git 信息。
 
-## Evidence Boundary
+## 保留语义层
 
-- Do not invent intent, impact, verification, decisions, or drama.
-- State uncertainty and missing evidence plainly.
-- Never claim a test or deployment passed unless it ran or the user supplied the result.
+- 将长期有效的事实提炼到 `## Observations`，格式为 `- [类别] 事实`。章节名及机器读取的 schema 字段保留约定写法，观察内容使用简体中文。
+- 决策应记录为 `[decision]` 观察项，不要另建普通项目符号的“决策”章节。
+- 图关系放在 `## Relations`，使用 `- relation_type [[目标笔记]]`。关系类型和语法按系统约定保留；说明文字使用简体中文。
+- 关系确实能补充上下文时再添加；不要为了让笔记显得有关联而虚构目标。
+
+## 证据边界
+
+- 不得编造意图、影响、验证结果、决策或戏剧化情节。
+- 明确说明不确定之处和缺失的证据。
+- 除非确实运行过测试或部署，或用户提供了结果，否则不得声称成功。

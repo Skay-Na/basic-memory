@@ -1,7 +1,7 @@
 interface:
-  display_name: "Remember"
-  short_description: "Save small facts and preferences"
+  display_name: "快速记忆"
+  short_description: "保存简短事实和偏好"
   icon_small: "./assets/icon.svg"
   icon_large: "./assets/icon.svg"
   brand_color: "#2563EB"
-  default_prompt: "Use $bm-remember to save this fact or preference into Basic Memory."
+  default_prompt: "使用 $bm-remember 将这条事实或偏好保存到 Basic Memory。"

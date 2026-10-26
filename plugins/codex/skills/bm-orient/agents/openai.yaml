@@ -1,7 +1,7 @@
 interface:
-  display_name: "Orient"
-  short_description: "Resume from a Basic Memory checkpoint"
+  display_name: "恢复上下文"
+  short_description: "从 Basic Memory 检查点继续工作"
   icon_small: "./assets/icon.svg"
   icon_large: "./assets/icon.svg"
   brand_color: "#2563EB"
-  default_prompt: "Use $bm-orient to resume from a checkpoint or load current Basic Memory context before changing this repo."
+  default_prompt: "使用 $bm-orient 从检查点恢复，或在修改此仓库前加载 Basic Memory 中的当前上下文。"

@@ -1,7 +1,7 @@
 interface:
-  display_name: "Checkpoint"
-  short_description: "Create an immutable Codex handoff"
+  display_name: "工作检查点"
+  short_description: "创建不可变的 Codex 工作交接记录"
   icon_small: "./assets/icon.svg"
   icon_large: "./assets/icon.svg"
   brand_color: "#2563EB"
-  default_prompt: "Use $bm-checkpoint to create an immutable Basic Memory handoff and return the exact resume command."
+  default_prompt: "使用 $bm-checkpoint 在 Basic Memory 中创建不可变的工作交接记录，并返回准确的恢复命令。"
