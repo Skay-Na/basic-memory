@@ -87,6 +87,10 @@ non-overwrite flag must win even when the user's
 with `action: created`; treat the tool error `ALREADY_EXISTS` as the
 title collision above, and stop on any other action or error.
 
+## 保留与整理
+
+每次压缩的 checkpoint 都是不可变的恢复快照，数量会随压缩次数增长。不要设置固定数量上限，也不要自动移动、改写或删除旧 checkpoint。任务结束或用户要求整理时，先把仍有效的项目事实和决定更新到权威主题文档，再判断旧 checkpoint 是否仍有恢复价值。归档必须人工评估，并先验证原 permalink、关系、搜索和 Web UI 行为及备份可恢复性；Basic Memory 的移动结果受 `update_permalinks_on_move` 配置影响。当前设置或解析行为未经验证时，不得批量移动真实笔记。完整流程见 `docs/CODEX_CHECKPOINT_RETENTION.md`。
+
 Write a note to Basic Memory. For the `general` profile:
 
 - `title`: the timestamped checkpoint title above
