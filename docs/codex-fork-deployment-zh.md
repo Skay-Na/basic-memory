@@ -10,6 +10,8 @@
 - 两个启动器都需要锁定到同一个 Basic Memory 提交。使用完整提交 SHA 可以固定运行时内容，避免分支后续变化改变部署行为。
 - 项目映射、服务地址、凭据、Codex Hook 信任与审批属于部署者自己的机器或账户配置，不应写入仓库。
 
+新增的 `hooks/memory_review.py` 则随插件直接分发，管理同步 UserPromptSubmit / Stop 的语义检查和失败草稿；它不依赖上述核心运行时 SHA。具体工作流程与旧捕捉升级见 [每轮语义捕捉](codex-semantic-capture-zh.md)。
+
 ## 发布 fork 中的 Hook 改动
 
 Hook 核心代码必须先推送，之后才能把启动器锁到该提交。以下命令假定 fork 为 `https://github.com/<owner>/basic-memory`：
@@ -60,4 +62,4 @@ Codex marketplace 和插件通常按用户级安装。安装后启动新的 Code
 3. 该 SHA 在 fork 上可访问，并包含对应的 `src/basic_memory/cli/commands/hook.py` 实现。
 4. 部署者已在自己的机器上配置 Basic Memory 项目，并在 Codex 中启用且信任 Hook。
 
-前三项确保代码版本可复现；第四项是个人部署配置，仓库无法替代它。Hook 会保留用户输入原文，中文提示和 `bm-writing` 技能指导新生成的结构与说明使用简体中文；代码、路径、专有名词及明确要求的原文引用仍可保留原语言。
+前三项确保代码版本可复现；第四项是个人部署配置，仓库无法替代它。每轮语义捕捉由当前 Codex 结合上下文提炼事实，不直接存储整段用户输入；`bm-writing` 技能指导新笔记使用简体中文；代码、路径、专有名词及明确要求的原文引用仍可保留原语言。

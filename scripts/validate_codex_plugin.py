@@ -22,98 +22,38 @@ REQUIRED_SKILLS = (
     "bm-writing",
     "bm-share",
     "bm-status",
+    "bm-capture",
 )
+# Check machine contracts rather than translated prose so localized skills can
+# evolve without making the package validator depend on a particular language.
 REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
     "bm-setup": (
         "checkpointOnCompact",
         "captureEvents",
-        "user-level",
-        "project-level",
-        "codex/<repo-dir>",
+        "semanticCapture",
         "sessionProfile",
         "coding-session.md",
-        "hook status --harness codex",
-        "Keep Codex's default approval behavior",
-        "Pre-approve eligible tools",
-        '[plugins."codex@basic-memory".mcp_servers.basic-memory]',
         'default_tools_approval_mode = "approve"',
-        "Do not offer a per-tool or write-only trust profile",
-        "destructive annotation",
-        "writes,\nedits, and deletes may still prompt",
     ),
-    "bm-status": (
-        "~/.codex/basic-memory.json",
-        "checkpointOnCompact",
-        "hook status --harness codex",
-        "pending envelopes",
-        "archived envelopes",
-        "last flush",
-        "type=codex_session",
-        "type=coding_session",
-    ),
-    "bm-orient": (
-        "Always query `codex_session`",
-        "type=codex_session",
-        "type=coding_session",
-        "Choose exactly one route",
-        "read that note directly",
-        "`project=<configured primaryProject>`",
-        "Do not retry the identifier against secondary or other projects",
-        "Run the `coding_session` topic search separately",
-        'filters={"repository": "<configured repository>"}',
-        "omit `coding_session` results",
-        "Treat a recovered note as historical context",
-        "Report material drift explicitly",
-    ),
-    "bm-checkpoint": (
-        "Apply the `bm-writing` skill",
-        "A checkpoint is a durable handoff, not a status dump",
-        "Every invocation creates a new checkpoint",
-        "UTC YYYY-MM-DDTHH-MM-SSZ",
-        "snapshot plus pointers",
-        "username: <current username>",
-        "hostname: <current hostname>",
-        "type: coding_session",
-        "pull_request_number",
-        "- `[decision]` for each decision made or preserved",
-        "include exactly one",
-        "## Relations",
-        "- relates_to [[Exact existing note title]]",
-        "Never write `[relates_to]`",
-        "`project=<configured primaryProject>`",
-        "frontmatter `project` field is descriptive",
-        "codex_session_id",
-        'filters={"codex_session_id": "<exact host-provided id>"}',
-        "- continues [[Exact previous checkpoint title]]",
-        "## References",
-        "verify that GitHub can resolve that SHA",
-        "overwrite=False",
-        'output_format="json"',
-        "`write_note_overwrite_default` setting is true",
-        "with `action: created`",
-        "`file_path`, then `title`",
-        '$bm-orient "<exact returned resume identifier>"',
-    ),
+    "bm-status": ("hook status --harness codex", "memory_review.py", "pending", "expired"),
+    "bm-orient": ("codex_session", "coding_session", "repository"),
+    "bm-checkpoint": ("session_id", "overwrite=False", 'output_format="json"', "## Relations"),
     "bm-decide": ("codex/decisions",),
     "bm-remember": ("codex/remember",),
-    "bm-writing": (
-        "intentionally user-customizable",
-        "problem -> approach -> current state and impact",
-        "## Anchor The Work",
-        "## Preserve The Semantic Layer",
-        "- relation_type [[Target Note]]",
-        "Do not invent intent, impact, verification, decisions, or drama",
-    ),
+    "bm-writing": ("## Observations", "## Relations"),
+    "bm-capture": ("receipt", "saved", "no_memory", "pending", "drafts"),
 }
 REQUIRED_SCHEMAS = ("codex-session.md", "coding-session.md", "decision.md", "task.md")
 REQUIRED_HOOKS = {
     "SessionStart": "hooks/session_start.py",
     "PreCompact": "hooks/pre_compact.py",
+    "UserPromptSubmit": "hooks/memory_review.py",
+    "Stop": "hooks/memory_review.py",
+    "SessionEnd": "hooks/session_end_capture.py",
 }
 REQUIRED_HOOK_EVENTS = tuple(REQUIRED_HOOKS)
-# Zero-logic shims: the only hook code the plugin ships. The Python bodies
-# moved into the basic-memory package behind `bm hook` (SPEC-55).
-REQUIRED_HOOK_SCRIPTS = tuple(REQUIRED_HOOKS.values())
+# Lifecycle shims use the pinned core; semantic review is a local, standard-library script.
+REQUIRED_HOOK_SCRIPTS = tuple(dict.fromkeys(REQUIRED_HOOKS.values()))
 REQUIRED_SKILL_AGENT_FILES = ("agents/openai.yaml", "assets/icon.svg")
 REQUIRED_INTERFACE_ASSETS = {
     "composerIcon": "assets/app-icon.png",
@@ -122,7 +62,7 @@ REQUIRED_INTERFACE_ASSETS = {
 HOOK_SCRIPT_PATH_RE = re.compile(r"\$\{PLUGIN_ROOT\}/(hooks/[A-Za-z0-9_./-]+\.py)")
 HOOK_DEPENDENCY_RE = re.compile(
     r'"basic-memory @ git\+https://github\.com/'
-    r'basicmachines-co/basic-memory@([^"]+)"'
+    r'[^/]+/basic-memory@([^"]+)"'
 )
 
 
@@ -158,7 +98,7 @@ def validate_plugin(plugin_dir: Path) -> None:
     interface = manifest.get("interface")
     if not isinstance(interface, dict):
         raise SystemExit(f"{manifest_path}: missing interface object")
-    if interface.get("displayName") != "Basic Memory for Codex":
+    if not isinstance(interface.get("displayName"), str) or not interface["displayName"].strip():
         raise SystemExit(f"{manifest_path}: unexpected interface.displayName")
     for field, expected_path in REQUIRED_INTERFACE_ASSETS.items():
         if interface.get(field) != f"./{expected_path}":
@@ -200,6 +140,12 @@ def validate_plugin(plugin_dir: Path) -> None:
         command = command_hook.get("command")
         if not isinstance(command, str):
             raise SystemExit(f"hooks/hooks.json: {event} hook must define a command")
+        if event in {"UserPromptSubmit", "Stop"}:
+            verb = "prompt" if event == "UserPromptSubmit" else "stop"
+            if command_hook.get("async", False) is not False or not command.endswith(f" {verb}"):
+                raise SystemExit(f"hooks/hooks.json: {event} requires synchronous {verb}")
+        if event == "SessionEnd" and command_hook.get("async", False) is not False:
+            raise SystemExit("hooks/hooks.json: SessionEnd must run synchronously")
         script_refs = HOOK_SCRIPT_PATH_RE.findall(command)
         if script_refs != [expected_script]:
             raise SystemExit(f"hooks/hooks.json: {event} must reference exactly {expected_script}")
@@ -220,10 +166,14 @@ def validate_plugin(plugin_dir: Path) -> None:
         if not os.access(script, os.X_OK):
             raise SystemExit(f"Hook script is not executable: {script}")
         text = script.read_text(encoding="utf-8")
+        if rel in {"hooks/memory_review.py", "hooks/session_end_capture.py"}:
+            if "# /// script" not in text or "# dependencies = []" not in text:
+                raise SystemExit(f"Hook must be a dependency-free uv script: {script}")
+            continue
         dependency_match = HOOK_DEPENDENCY_RE.search(text)
         if "# /// script" not in text or dependency_match is None:
             raise SystemExit(f"Hook script missing pinned Basic Memory Git dependency: {script}")
-        dependency_refs.add(dependency_match.group(1))
+        dependency_refs.add(dependency_match.group(0))
     if len(dependency_refs) != 1:
         raise SystemExit("Codex hook scripts must use the same Basic Memory Git ref")
 

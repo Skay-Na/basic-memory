@@ -14,6 +14,10 @@ from basic_memory.schemas import ProjectIndexStatusResponse, ProjectInfoResponse
 from basic_memory.schemas.project_info import ProjectList, ProjectStatusResponse
 from basic_memory.schemas.v2 import ProjectResolveResponse
 from basic_memory.schemas.doctor import ProjectDoctorReport
+from basic_memory.schemas.v2.maintenance import (
+    MemoryMaintenanceCompletionResponse,
+    MemoryMaintenanceStatus,
+)
 
 
 class ProjectClient:
@@ -40,6 +44,37 @@ class ProjectClient:
             http_client: HTTPX AsyncClient for making requests
         """
         self.http_client = http_client
+
+    async def memory_maintenance_status(
+        self,
+        project_id: str,
+        *,
+        batch_size: int = 20,
+    ) -> MemoryMaintenanceStatus:
+        """Read the next bounded project maintenance batch."""
+        from basic_memory.mcp.tools.utils import call_get
+
+        response = await call_get(
+            self.http_client,
+            f"/v2/projects/{project_id}/memory-maintenance",
+            params={"batch_size": batch_size},
+        )
+        return MemoryMaintenanceStatus.model_validate(response.json())
+
+    async def complete_memory_maintenance(
+        self,
+        project_id: str,
+        through_position: int,
+    ) -> MemoryMaintenanceCompletionResponse:
+        """Advance the checkpoint after the agent completes the returned batch."""
+        from basic_memory.mcp.tools.utils import call_post
+
+        response = await call_post(
+            self.http_client,
+            f"/v2/projects/{project_id}/memory-maintenance/complete",
+            json={"through_position": through_position},
+        )
+        return MemoryMaintenanceCompletionResponse.model_validate(response.json())
 
     async def list_projects(self) -> ProjectList:
         """List all available projects.

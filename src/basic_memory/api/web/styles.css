@@ -959,6 +959,7 @@ textarea:focus-visible,
   font-variant-numeric: tabular-nums;
 }
 .graph-canvas {
+  position: relative;
   flex: 1;
   min-height: 0;
   border: 1px solid #efeee8;
@@ -990,6 +991,7 @@ textarea:focus-visible,
   fill: #e6ece3;
   stroke: #b9cbb6;
   stroke-width: 1.4;
+  transition: fill 220ms ease, stroke 220ms ease, filter 220ms ease;
 }
 .graph-node text {
   font:
@@ -998,9 +1000,56 @@ textarea:focus-visible,
   fill: #555b51;
   text-anchor: middle;
 }
-.graph-node:hover circle {
+.graph-node:hover circle,
+.graph-node:focus-visible circle {
   fill: #cadcc8;
   stroke: #7e9b7a;
+  filter: drop-shadow(0 0 6px #a7c49c80);
+}
+.graph-node:focus {
+  outline: none;
+}
+.graph-tooltip {
+  position: absolute;
+  z-index: 3;
+  width: min(300px, calc(100% - 24px));
+  box-sizing: border-box;
+  padding: 16px 18px;
+  border: 1px solid #dfe6da;
+  border-radius: 14px;
+  background: #fffffff5;
+  box-shadow: 0 8px 32px #354b3020;
+  pointer-events: none;
+  overflow-wrap: anywhere;
+}
+.graph-tooltip[hidden] {
+  display: none;
+}
+.graph-tooltip-type {
+  margin-bottom: 6px;
+  color: #7b9271;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.graph-tooltip-title {
+  color: #36432f;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.graph-tooltip-summary {
+  margin: 8px 0 0;
+  color: #70776a;
+  font-size: 12px;
+  line-height: 1.7;
+  max-height: 180px;
+  overflow: hidden;
+}
+@media (prefers-reduced-motion: reduce) {
+  .graph-node circle {
+    transition: none;
+  }
 }
 .graph-legend {
   display: flex;
@@ -1072,6 +1121,90 @@ textarea:focus-visible,
   border-radius: 13px;
   box-shadow: 0 18px 70px #22221f2b;
   overflow: hidden;
+}
+.maintenance-modal {
+  width: min(430px, calc(100vw - 32px));
+  padding: 24px;
+  border: 1px solid #e9e8e2;
+  border-radius: 13px;
+  background: #fff;
+  box-shadow: 0 18px 70px #22221f2b;
+}
+.maintenance-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+.maintenance-heading .eyebrow {
+  margin: 0 0 7px;
+}
+.maintenance-heading h2 {
+  margin: 0;
+  color: #30312d;
+  font-family: var(--serif);
+  font-size: 24px;
+  font-weight: 400;
+}
+.maintenance-description,
+.maintenance-hint {
+  color: #85857e;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.maintenance-description {
+  margin: 12px 0 21px;
+}
+.maintenance-field {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+  color: #55574f;
+  font-size: 11px;
+  font-weight: 600;
+}
+.maintenance-input-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #85857e;
+  font-weight: 400;
+}
+.maintenance-input-row input {
+  width: 112px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid #e3e2dc;
+  border-radius: 7px;
+  background: #fbfaf8;
+  color: #30312d;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.maintenance-hint {
+  margin: 18px 0 22px;
+}
+.maintenance-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid #efeee9;
+  padding-top: 16px;
+}
+.secondary-button {
+  border: 1px solid #e5e4de;
+  border-radius: 7px;
+  background: #fff;
+  padding: 8px 12px;
+  color: #66675f;
+  font-size: 10px;
+}
+.secondary-button:hover {
+  background: #f6f5f2;
+}
+.maintenance-actions button:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 .modal-backdrop {
   position: fixed;

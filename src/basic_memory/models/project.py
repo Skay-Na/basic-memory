@@ -91,6 +91,30 @@ class Project(Base):
         server_default=text("0"),
     )
 
+    # A consolidation checkpoint consumes the accepted-note journal without
+    # changing its ordering substrate. New accepted writes remain beyond this
+    # position and become eligible for a later maintenance pass.
+    memory_maintenance_position: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+    memory_maintenance_completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Upgrade-time baseline for existing projects; unlike completed_at this
+    # does not claim that a maintenance pass has actually run.
+    memory_maintenance_baseline_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    memory_maintenance_interval_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=14, server_default=text("14")
+    )
+    memory_maintenance_note_threshold: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=20, server_default=text("20")
+    )
+
     # Define relationships to entities, observations, and relations
     # These relationships will be established once we add project_id to those models
     entities = relationship("Entity", back_populates="project", cascade="all, delete-orphan")

@@ -21,15 +21,22 @@ The browser process is separate from `basic-memory mcp`. It loads the same local
 configuration and database, so do not point two different installs at different configuration
 directories when you expect them to show the same notes.
 
+The account gear opens an informational page on the local server. Login credentials are managed
+by the authenticated router gateway; the page links to that gateway's account settings.
+
 ## Current workspace features
 
 - Chinese-first interface with a persistent Chinese/English switch in the sidebar.
+- Per-project memory-maintenance settings in the sidebar: configure a day interval and a distinct changed-note threshold; either threshold can trigger a future agent review.
 - Three-pane layout with project switching, a folder tree that opens Markdown files directly, a filtered note list, and note detail.
 - Search over the active project with the keyboard shortcut `Ctrl+K` or `Cmd+K`.
 - Rich writing, Markdown source, and rendered preview modes. The source view preserves frontmatter; preview supports headings, lists, task lists, tables, links, images, fenced code, and clickable `[[wiki links]]`.
 - Markdown edits use the v2 accepted-note API, save automatically, preserve frontmatter in rich mode, and save pending changes before navigating to another note.
 - Create and delete notes, pin notes in this browser, and browse recent note updates.
 - Knowledge graph view with connected notes, zoom buttons, wheel zoom, press-and-drag panning, and clickable nodes.
+- Graph nodes drift gently with their connecting lines. Hover or keyboard focus steadies a node and
+  shows its title and a short excerpt from the note (loaded on demand, without editing it).
+  The graph respects the system's reduced-motion preference.
 
 Pins are stored in this browser's local storage. Activity is currently a recent-note view based on
 the project's indexed update timestamps. Cloud-only account, team, billing, sync, sharing,

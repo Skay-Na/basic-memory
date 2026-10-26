@@ -15,12 +15,12 @@ description: 检查 Basic Memory for Codex 的配置、连接、Hook 状态、�
 
 2. **插件配置**
    - 读取 `~/.codex/basic-memory.json`，再读取最近的项目级 `.codex/basic-memory.json`；项目键覆盖用户级键。
-   - 报告解析后的 `primaryProject`、`secondaryProjects`、`teamProjects`、`captureFolder`、`rememberFolder`、`recallTimeframe`、`focus`、`sessionProfile`、`repository`、`checkpointOnCompact` 和 `captureEvents`。
+   - 报告解析后的 `primaryProject`、`remoteMcpUrl`、`secondaryProjects`、`teamProjects`、`captureFolder`、`rememberFolder`、`recallTimeframe`、`focus`、`sessionProfile`、`repository`、`checkpointOnCompact` 和 `captureEvents`。
    - 对省略的 Codex 默认值按 `rememberFolder=codex/remember`、`checkpointOnCompact=true` 处理。
 
 3. **核心 Hook 健康状态**
    - 使用第一个可用的启动程序运行 `basic-memory hook status --harness codex --project-dir <仓库根目录>`。
-   - 报告命令提供的共享收件箱路径、待处理信封、已归档信封、最近 flush、设置状态、解析后的主项目、捕获状态、捕获目录、检查点提示状态、Basic Memory 版本和 uv 版本。
+   - 报告命令提供的共享收件箱路径、待处理信封、已归档信封、最近 flush、设置状态、解析后的主项目和 SessionStart 读取源、捕获状态、捕获目录、检查点提示状态、Basic Memory 版本和 uv 版本。`remote MCP` 表示配置路由；只有读取到远端上下文后，才可说启动读取已实测成功。
    - 收件箱计数在受支持的 harness 之间共享，不要把所有积压都归因于 Codex。
    - Hook 行为以命令解析出的设置为准；若与手动读取的配置不同，说明差异。
 
@@ -38,6 +38,10 @@ description: 检查 Basic Memory for Codex 的配置、连接、Hook 状态、�
    - 查询 `type=task`、`status=active` 的活跃任务。
    - 查询 `type=decision`、`status=open` 的未关闭决策。
 
+## 每轮语义捕捉状态
+
+读取插件根目录 `hooks/memory_review.py`，使用 `uv run --quiet --no-project --script <脚本绝对路径> status` 检查本机状态库。报告 `semanticCapture`（默认 true）以及 collecting、requested（旧版遗留）、saved、no_memory、pending、unresolved、expired 的数量；此计数覆盖本机项目，不要全算到当前项目。pending 表示等待后续 Codex 回合查重重试，Stop 仅登记遗漏并正常结束，不触发可见续轮；unresolved 表示等待后续同范围回合复核的未完成检查，expired 表示七天后清除了未完成草稿，均不是保存成功。saved 是智能体提交的回执，不等同于再次读取服务端验证。诊断时不要输出草稿正文或凭据。确认插件注册了同步 UserPromptSubmit/Stop，并排查旧的关键词捕捉 handler 是否仍在并行写入。
+
 ## 汇报格式
 
 用以下字段简洁汇报：
@@ -46,6 +50,7 @@ description: 检查 Basic Memory for Codex 的配置、连接、Hook 状态、�
 Basic Memory for Codex 状态
 - CLI：<版本或不可用>
 - 项目：<primaryProject 或默认项目>
+- 启动上下文读取源：<remote MCP URL 或本地 Basic Memory 项目>
 - 读取项目：<secondaryProjects 或无>
 - 分享目标：<teamProjects 或无>
 - 捕获目录：<captureFolder>

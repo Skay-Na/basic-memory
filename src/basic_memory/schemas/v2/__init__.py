@@ -23,6 +23,13 @@ from basic_memory.schemas.v2.project_index import (
     ProjectIndexResponse,
     ProjectIndexStartedResponse,
 )
+from basic_memory.schemas.v2.maintenance import (
+    ChangedMemoryNote,
+    MemoryMaintenanceCompletion,
+    MemoryMaintenanceCompletionResponse,
+    MemoryMaintenanceSettings,
+    MemoryMaintenanceStatus,
+)
 
 __all__ = [
     "EntityResolveRequest",
@@ -42,4 +49,9 @@ __all__ = [
     "OrphanEntitiesResponse",
     "ProjectIndexResponse",
     "ProjectIndexStartedResponse",
+    "ChangedMemoryNote",
+    "MemoryMaintenanceCompletion",
+    "MemoryMaintenanceCompletionResponse",
+    "MemoryMaintenanceSettings",
+    "MemoryMaintenanceStatus",
 ]

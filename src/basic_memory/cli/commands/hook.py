@@ -42,6 +42,8 @@ import shutil
 import stat
 import subprocess
 import sys
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -594,6 +596,79 @@ async def _query(project_ref: str | None, **filters: Any) -> dict[str, Any] | No
     return result
 
 
+def _remote_mcp_request(
+    url: str,
+    payload: dict[str, Any],
+    session_id: str | None = None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Send one JSON-RPC message to the configured Streamable HTTP MCP server."""
+    headers = {
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+    }
+    if session_id:
+        headers["Mcp-Session-Id"] = session_id
+    request = urllib.request.Request(
+        url,
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers=headers,
+    )
+    with urllib.request.urlopen(request, timeout=QUERY_TIMEOUT_SECONDS) as response:
+        active_session = response.headers.get("Mcp-Session-Id", session_id)
+        raw = response.read().decode("utf-8", "replace").strip()
+
+    if not raw:
+        return None, active_session
+
+    messages: list[Any] = []
+    if "data:" in raw:
+        for line in raw.splitlines():
+            if not line.startswith("data:"):
+                continue
+            try:
+                messages.append(json.loads(line[5:].strip()))
+            except json.JSONDecodeError:
+                continue
+    else:
+        try:
+            messages.append(json.loads(raw))
+        except json.JSONDecodeError as exc:
+            raise ValueError("remote MCP returned an unreadable response") from exc
+
+    for message in reversed(messages):
+        if isinstance(message, dict) and ("result" in message or "error" in message):
+            return message, active_session
+    return None, active_session
+
+
+def _remote_search_result(response: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Unwrap a Basic Memory `search_notes` result from the MCP response."""
+    if response is None or "error" in response:
+        return None
+    tool_result = response.get("result")
+    if not isinstance(tool_result, dict) or tool_result.get("isError") is True:
+        return None
+
+    structured = tool_result.get("structuredContent")
+    if isinstance(structured, dict):
+        result = structured.get("result", structured)
+        if isinstance(result, dict) and isinstance(result.get("results"), list):
+            return result
+
+    content = tool_result.get("content")
+    if isinstance(content, list):
+        for item in content:
+            if not isinstance(item, dict) or not isinstance(item.get("text"), str):
+                continue
+            try:
+                result = json.loads(item["text"])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(result, dict) and isinstance(result.get("results"), list):
+                return result
+    return None
+
+
 @dataclass
 class _BriefContext:
     tasks: dict[str, Any] | None
@@ -608,7 +683,19 @@ async def _gather_context(
     timeframe: str,
     shared_refs: list[str],
     repository: str | None = None,
+    remote_mcp_url: str | None = None,
 ) -> _BriefContext:
+    if remote_mcp_url is not None:
+        return await asyncio.to_thread(
+            _gather_remote_context,
+            profile,
+            primary,
+            timeframe,
+            shared_refs,
+            repository,
+            remote_mcp_url,
+        )
+
     # Cloud reads cost a round-trip each; asyncio.gather keeps total wall-clock
     # at ~one query instead of the sum (ports the hook scripts' thread pool).
     project = primary or None
@@ -640,6 +727,114 @@ async def _gather_context(
     return _BriefContext(
         tasks=results[0],
         decisions=results[1],
+        sessions=_merge_search_results(results[2:session_end]),
+        shared=dict(zip(shared_refs, results[session_end:])),
+    )
+
+
+def _gather_remote_context(
+    profile: HarnessProfile,
+    primary: str,
+    timeframe: str,
+    shared_refs: list[str],
+    repository: str | None,
+    remote_mcp_url: str,
+) -> _BriefContext:
+    """Read the bounded briefing queries through one remote MCP session.
+
+    A configured remote URL is authoritative for this briefing. If it is empty,
+    unreachable, or returns an error, the caller reports that the project could
+    not be read instead of silently presenting a different local graph.
+    """
+    empty = _BriefContext(None, None, None, {ref: None for ref in shared_refs})
+    if not remote_mcp_url.strip():
+        return empty
+
+    project = primary or None
+    session_queries: list[dict[str, Any]] = []
+    if repository is not None:
+        session_queries.append(
+            {
+                "note_types": [profile.coding_session_note_type],
+                "metadata_filters": {"repository": repository},
+                "after_date": timeframe,
+            }
+        )
+    session_queries.append(
+        {"note_types": list(profile.recall_session_types), "after_date": timeframe}
+    )
+    queries: list[tuple[str | None, dict[str, Any]]] = [
+        (project, {"note_types": ["task"], "status": "active"}),
+        (project, {"note_types": ["decision"], "status": "open"}),
+    ]
+    queries.extend((project, filters) for filters in session_queries)
+    queries.extend((ref, {"note_types": ["decision"], "status": "open"}) for ref in shared_refs)
+
+    session_id: str | None = None
+    results: list[dict[str, Any] | None] = []
+    try:
+        initialized, session_id = _remote_mcp_request(
+            remote_mcp_url,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "basic-memory-session-brief", "version": "1"},
+                },
+            },
+        )
+        if initialized is None or "error" in initialized or not session_id:
+            return empty
+
+        _remote_mcp_request(
+            remote_mcp_url,
+            {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+            session_id,
+        )
+        for request_id, (project_ref, filters) in enumerate(queries, start=2):
+            arguments: dict[str, Any] = {"page_size": 5, "output_format": "json", **filters}
+            if project_ref:
+                arguments.update(_project_query_kwargs(project_ref))
+            try:
+                response, session_id = _remote_mcp_request(
+                    remote_mcp_url,
+                    {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "method": "tools/call",
+                        "params": {"name": "search_notes", "arguments": arguments},
+                    },
+                    session_id,
+                )
+                results.append(_remote_search_result(response))
+            except Exception:
+                # A failed query is represented like a failed local search; the
+                # rest of the bounded briefing can still be useful.
+                results.append(None)
+    except Exception:
+        return empty
+    finally:
+        if session_id:
+            request = urllib.request.Request(
+                remote_mcp_url,
+                headers={"Mcp-Session-Id": session_id},
+                method="DELETE",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=2):
+                    pass
+            except (OSError, urllib.error.URLError, TimeoutError):
+                # Session deletion is optional in Streamable HTTP; query results
+                # remain valid when a server expires sessions on its own.
+                pass
+
+    session_end = 2 + len(session_queries)
+    return _BriefContext(
+        tasks=results[0] if results else None,
+        decisions=results[1] if len(results) > 1 else None,
         sessions=_merge_search_results(results[2:session_end]),
         shared=dict(zip(shared_refs, results[session_end:])),
     )
@@ -757,8 +952,20 @@ def _build_brief(
             )
         repository = configured_repository.strip()
 
+    remote_mcp_url: str | None = None
+    if is_codex and "remoteMcpUrl" in cfg:
+        configured_url = cfg.get("remoteMcpUrl")
+        remote_mcp_url = configured_url.strip() if isinstance(configured_url, str) else ""
+
     context = run_with_cleanup(
-        _gather_context(profile, primary, timeframe, shared_refs, repository=repository)
+        _gather_context(
+            profile,
+            primary,
+            timeframe,
+            shared_refs,
+            repository=repository,
+            remote_mcp_url=remote_mcp_url,
+        )
     )
 
     # Trigger: every primary query failed (no default project, misnamed project,
@@ -1732,6 +1939,16 @@ def status(
         f"settings ({harness.value}, {mapping_dir}): {'found' if configured else 'not found'}"
     )
     typer.echo(f"primary project: {str(cfg.get('primaryProject') or '').strip() or '(not set)'}")
+    if harness is Harness.codex and "remoteMcpUrl" in cfg:
+        remote_url = cfg.get("remoteMcpUrl")
+        source = (
+            remote_url.strip()
+            if isinstance(remote_url, str) and remote_url.strip()
+            else "(invalid URL)"
+        )
+        typer.echo(f"session context source: remote MCP ({source})")
+    else:
+        typer.echo("session context source: local Basic Memory project")
     typer.echo(f"session profile: {str(cfg.get('sessionProfile') or 'general').strip()}")
     typer.echo(f"repository: {str(cfg.get('repository') or '').strip() or '(not set)'}")
     typer.echo(

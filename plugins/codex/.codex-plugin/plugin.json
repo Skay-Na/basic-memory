@@ -35,9 +35,9 @@
     "privacyPolicyURL": "https://basicmemory.com/privacy",
     "termsOfServiceURL": "https://basicmemory.com/terms",
     "defaultPrompt": [
-      "修改此仓库前，先从 Basic Memory 获取上下文。",
-      "将此 Codex 对话保存为 Basic Memory 工作检查点。",
-      "记录我们刚刚作出的决策。"
+      "开始实质性工作前，使用 bm-orient 从 Basic Memory 读取当前项目状态，并按主题做混合语义检索；用当前仓库证据核对历史信息。",
+      "当用户确认重要决定或明确表达长期偏好时及时保存，不要等到压缩或会话结束；先查重，避免重复笔记。",
+      "上下文压缩后按 bm-checkpoint 保存不可变工作快照；按需使用 bm-curate 整理重复、过期、孤立或缺少关系的笔记。"
     ],
     "brandColor": "#2563EB",
     "composerIcon": "./assets/app-icon.png",

@@ -1,0 +1,7 @@
+interface:
+  display_name: "整理记忆"
+  short_description: "按指定范围审查重复、过期、矛盾和缺少关联的笔记，并提出整理方案"
+  icon_small: "./assets/icon.svg"
+  icon_large: "./assets/icon.svg"
+  brand_color: "#2563EB"
+  default_prompt: "使用 $bm-curate 审查当前项目的记忆，并报告可核实的整理建议。"

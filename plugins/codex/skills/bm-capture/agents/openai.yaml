@@ -1,0 +1,7 @@
+interface:
+  display_name: "语义捕捉"
+  short_description: "结合对话含义捕捉长期事实和决策，查重后保存并跟踪失败重试状态"
+  icon_small: "./assets/icon.svg"
+  icon_large: "./assets/icon.svg"
+  brand_color: "#2563EB"
+  default_prompt: "使用 $bm-capture 完成本轮记忆检查，并提交准确的保存或待重试回执。"

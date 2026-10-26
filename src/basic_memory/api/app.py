@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
@@ -115,6 +115,33 @@ async def serve_web_app() -> FileResponse:
 
 
 app.add_api_route("/", serve_web_app, methods=["GET"], include_in_schema=False)
+
+
+async def serve_local_account_info() -> HTMLResponse:
+    """Explain that login settings belong to the authenticated deployment gateway."""
+    return HTMLResponse(
+        """<!doctype html><html lang="zh-CN"><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>账户设置 · Basic Memory</title>
+<style>
+body{margin:0;background:#f7f7f3;color:#35402f;font:16px/1.7 system-ui,sans-serif}
+main{max-width:560px;margin:12vh auto;padding:32px;background:#fff;border:1px solid #e8e8e0;border-radius:16px}
+h1{font-size:24px}p{color:#686e63}.actions{display:flex;gap:16px;flex-wrap:wrap;margin-top:24px}
+a{color:#41634a}a.primary{padding:10px 14px;border-radius:9px;background:#41634a;color:#fff;text-decoration:none}
+</style><main><h1>本机测试站</h1>
+<p>本机测试站没有单独的登录账户。此页面的账户名和密码由软路由 Web UI 网关管理。</p>
+<p>本地测试站仍可正常编辑本机知识库；账户设置不会影响本地笔记。</p>
+<div class="actions"><a class="primary" href="http://127.0.0.1:18891/__webui/account">前往软路由账户设置</a>
+<a href="/">返回本机 Web UI</a></div></main></html>"""
+    )
+
+
+app.add_api_route(
+    "/__webui/account",
+    serve_local_account_info,
+    methods=["GET"],
+    include_in_schema=False,
+)
 
 
 # fastapi-redis-sdk's hit handler and response capture. Registered before the

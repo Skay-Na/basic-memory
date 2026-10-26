@@ -22,6 +22,7 @@ description: 在用户级或项目级为 Codex 配置 Basic Memory 项目映射�
 
 - **配置级别**：用户级 `~/.codex/basic-memory.json` 或项目级 `.codex/basic-memory.json`。明确询问，默认建议用户级。项目设置按键覆盖用户设置。
 - **存储模式**：云端、本地或混合。以用户明确选择为准，不跟随 CLI 默认值。
+- **SessionStart 读取路由**：若 Codex hook 的 CLI 与活动 Basic Memory MCP 指向不同存储，询问启动简报应读取哪一端。远端读取需用户提供 hook 进程可访问的 Streamable HTTP MCP URL，并写入 `remoteMcpUrl`；此 hook 不附加 bearer token，因此受保护的远端入口须通过已认证的本机隧道或其他预认证代理访问。不得把 token 写入此 JSON。
 - **focus**：代码/开发、研究、写作、规划或混合。
 - **sessionProfile**：`coding` 或 `general`。代码/开发建议 `coding`。混合场景下，询问此仓库是否要捕获 Git 和 PR 上下文。不能只因当前目录是 Git 仓库就推断为 `coding`。
 - **primaryProject**：现有 Basic Memory 项目，或需要新建的项目。
@@ -31,6 +32,7 @@ description: 在用户级或项目级为 Codex 配置 Basic Memory 项目映射�
 - **rememberFolder**：默认 `codex/remember`。
 - **placementConventions**：简短说明决策、任务和研究笔记应放在哪里。决策默认放 `codex/decisions`，使 Codex 写入内容集中在同一目录树下。
 - **checkpointOnCompact**：压缩后的 SessionStart 是否要求 Codex 运行 `bm-checkpoint`。默认 true；显式 JSON 布尔值 `false` 可关闭。
+- **semanticCapture**：是否让当前 Codex 在每轮结束前检查长期信息并通过 MCP 保存。默认 true；设为 JSON 布尔值 false 可关闭。它会创建本地处理回执、必要时最多继续一次记忆检查；失败草稿保留七天，后续同项目回合复核重试。它独立于 captureEvents 和 checkpointOnCompact。
 - **captureEvents**：是否将生命周期事件信封记录到本地 Hook 收件箱。默认 true；显式 JSON 布尔值 `false` 可关闭。
 - **MCP 审批**：请用户从以下两种方式中明确选择一种：
   1. 保留 Codex 默认审批方式，不更改 Codex 配置。
@@ -54,6 +56,7 @@ description: 在用户级或项目级为 Codex 配置 Basic Memory 项目映射�
 {
   "basicMemory": {
     "primaryProject": "<项目引用>",
+    "remoteMcpUrl": "<可选：hook 可访问的 Streamable HTTP MCP URL>",
     "secondaryProjects": [],
     "projectMode": "cloud",
     "teamProjects": {},
@@ -63,12 +66,15 @@ description: 在用户级或项目级为 Codex 配置 Basic Memory 项目映射�
     "recallTimeframe": "7d",
     "checkpointOnCompact": true,
     "captureEvents": true,
+    "semanticCapture": true,
     "placementConventions": "决策放在 codex/decisions/，工作检查点放在 codex/<仓库目录名>/。"
   }
 }
 ```
 
 省略 `captureFolder` 可使用 `codex/<repo-dir>`；只有用户明确覆盖时才持久化该值。若文件已存在，保留无关键。文件只供 Codex 使用；不要写入 `.claude/settings.json`。用户选择云端、本地或混合路由时，填写 `projectMode`。始终将 `checkpointOnCompact` 和 `captureEvents` 保存为 JSON 布尔值。
+
+`remoteMcpUrl` 是可选项。设置后，Codex SessionStart 的任务、决策和检查点查询只使用该 MCP 服务；远端不可达时明确报告读取失败，不回退到本机另一份图谱。确认项目名在远端存在，并只填写无需在 URL 或配置文件中保存凭据的地址。
 
 用户级 coding 设置中，不要在共用用户文件写入 `sessionProfile`；将 coding profile 和确认过的仓库标识留在项目文件，避免影响其他仓库：
 

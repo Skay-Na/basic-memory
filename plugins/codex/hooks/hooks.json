@@ -1,5 +1,5 @@
 {
-  "description": "Basic Memory for Codex 生命周期 Hook：从知识图谱加载上下文、记录本地事件轨迹，并在上下文压缩后提示创建检查点。",
+  "description": "Basic Memory 生命周期 Hook：加载上下文、语义捕捉每轮长期信息，并在压缩后创建检查点。",
   "hooks": {
     "SessionStart": [
       {
@@ -23,6 +23,41 @@
             "command": "uv run --quiet --script \"${PLUGIN_ROOT}/hooks/pre_compact.py\"",
             "statusMessage": "正在将 Codex 工作检查点写入 Basic Memory",
             "timeout": 60
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --quiet --no-project --script \"${PLUGIN_ROOT}/hooks/memory_review.py\" prompt",
+            "statusMessage": "正在准备 Basic Memory 语义检查",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --quiet --no-project --script \"${PLUGIN_ROOT}/hooks/memory_review.py\" stop",
+            "statusMessage": "正在检查本轮记忆处理状态",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --quiet --no-project --script \"${PLUGIN_ROOT}/hooks/session_end_capture.py\"",
+            "timeout": 30
           }
         ]
       }

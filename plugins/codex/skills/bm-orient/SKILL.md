@@ -13,9 +13,9 @@ description: 根据准确的 Basic Memory 检查点恢复工作，或结合当�
 
 先读取 `~/.codex/basic-memory.json`，再读取最近的项目级 `.codex/basic-memory.json`；项目级键覆盖用户级键。使用 `primaryProject`、`secondaryProjects`、`recallTimeframe`、`sessionProfile`、`repository` 和 `placementConventions`。如果文件不存在，继续发现项目并明确选择列出的默认项目或唯一项目，同时说明尚未完成 setup。
 
-## 只选择一条检索路径
+## 按意图检索
 
-根据本次调用内容，恰好选择以下一条路径。
+准确标识优先走精确读取。按主题恢复时使用结构化元数据缩小范围，再用混合检索补充不同标题下的相关内容。不要用语义相似度替代身份、仓库或状态过滤。
 
 ### 准确检查点
 
@@ -25,7 +25,7 @@ description: 根据准确的 Basic Memory 检查点恢复工作，或结合当�
 
 ### 按主题发现
 
-用户给出的是主题而非准确标识时，在主项目搜索匹配的 `task`、`decision` 和 `codex_session` 笔记。
+用户给出的是主题而非准确标识时，在主项目搜索匹配的 `task`、`decision` 和 `codex_session` 笔记。根据主题追加一次混合搜索，以发现标题和措辞不同但语义相关的笔记；按需读取最相关的少数结果，而不是把整库都当作上下文。
 
 单独执行 `coding_session` 主题搜索；仅当 `sessionProfile=coding` 且已设置 `repository` 时才包含，并使用精确配置值作为 `filters={"repository": "<已配置仓库>"}`。不得用主题相似度弥补仓库缺失或不匹配。coding profile 未配置仓库时，省略 `coding_session` 结果并说明 setup 未完成。
 
@@ -45,6 +45,12 @@ description: 根据准确的 Basic Memory 检查点恢复工作，或结合当�
 - 若 `sessionProfile=coding`，再查询 `type=coding_session`、`repository=<已配置仓库>` 及 `recallTimeframe` 时间范围。
 
 始终查询 `codex_session`；coding profile 仅在具备仓库元数据过滤时才查询 `coding_session`。不得执行无范围的 coding-session 查询；缺少仓库时说明 setup 未完成。合并去重后按最新时间排序，并优先选择信号最强的检查点，不论其由哪个流程生成。`coding_session` 保存 schema 必需且可查询的 Git 上下文；`codex_session` 保存通用和旧版 Codex 检查点。不要查询生命周期轨迹：`bm hook flush` 会将其归档在本机，不会提升到知识图谱。
+
+如果本次请求涉及实质性的实现、排障、规划或持续项目，除了上述状态笔记，再从用户目标、组件名、错误/功能关键词中选出 2–5 个具体词，在主项目执行一次 `mode="hybrid"` 的语义检索。关键词要贴近本次任务；不要只搜泛词如“项目”或“记忆”。读取最相关的少数候选，提取旧决定、已知约束、先前尝试和未解决问题。
+
+- 对明确的 ID、标题、路径、版本或状态使用精确/全文/元数据检索；对概念相近、措辞不同的内容使用混合检索。
+- 如果混合检索不可用或报错，退回全文检索并说明语义召回不可用；不要把空结果解释成“从未记录”。
+- 搜索结果只负责提供线索。核对当前仓库、配置或运行状态后再采用；引用历史结论时附 permalink，并说明它是否已由当前证据确认。
 
 以只读方式查询配置的 `secondaryProjects` 中的未关闭决策。了解上下文时，不要写入共享项目。
 

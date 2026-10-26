@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f8f7f4" />
     <title>Basic Memory</title>
-    <link rel="stylesheet" href="/assets/styles.css" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20261026-maintenance-settings" />
   </head>
   <body>
     <div class="app-shell">
@@ -65,6 +65,8 @@
         <div class="sidebar-footer">
           <div class="connection-dot"></div>
           <span data-i18n="Local knowledge base">Local knowledge base</span
+          ><button class="icon-button" id="maintenance-settings" type="button" aria-label="Memory maintenance settings" data-i18n-aria="Memory maintenance settings" title="Memory maintenance settings" data-i18n-title="Memory maintenance settings">◷</button
+          ><a class="icon-button" href="/__webui/account" style="text-decoration:none" aria-label="Account settings" data-i18n-aria="Account settings" title="Account settings" data-i18n-title="Account settings">⚙</a
           ><button class="language-toggle" id="language-toggle" type="button">EN</button><button class="icon-button" id="refresh" aria-label="Refresh" data-i18n-aria="Refresh">
             ↻
           </button>
@@ -280,12 +282,52 @@
         </div>
       </section>
     </div>
+    <div class="modal-backdrop hidden" id="maintenance-modal">
+      <section
+        class="maintenance-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="maintenance-title"
+      >
+        <div class="maintenance-heading">
+          <div>
+            <p class="eyebrow" data-i18n="PROJECT SETTINGS">PROJECT SETTINGS</p>
+            <h2 id="maintenance-title" data-i18n="Memory maintenance settings">Memory maintenance settings</h2>
+          </div>
+          <button class="icon-button" id="maintenance-close" type="button" aria-label="Close settings" data-i18n-aria="Close settings">×</button>
+        </div>
+        <p class="maintenance-description" data-i18n="Set when the agent should review memories. Either condition can trigger a review. Codex memory maintenance must be enabled.">
+          Set when the agent should review memories. Either condition can trigger a review. Codex memory maintenance must be enabled.
+        </p>
+        <form id="maintenance-form">
+          <label class="maintenance-field" for="maintenance-interval-days">
+            <span data-i18n="Review after">Review after</span>
+            <span class="maintenance-input-row">
+              <input id="maintenance-interval-days" type="number" min="1" max="365" step="1" required />
+              <span data-i18n="days">days</span>
+            </span>
+          </label>
+          <label class="maintenance-field" for="maintenance-note-threshold">
+            <span data-i18n="Or after">Or after</span>
+            <span class="maintenance-input-row">
+              <input id="maintenance-note-threshold" type="number" min="1" max="1000" step="1" required />
+              <span data-i18n="different notes">different notes</span>
+            </span>
+          </label>
+          <p class="maintenance-hint" data-i18n="Either threshold triggers a review.">Either threshold triggers a review.</p>
+          <div class="maintenance-actions">
+            <button id="maintenance-cancel" class="secondary-button" type="button" data-i18n="Cancel">Cancel</button>
+            <button id="maintenance-save" class="primary-button compact" type="submit" data-i18n="Save settings">Save settings</button>
+          </div>
+        </form>
+      </section>
+    </div>
     <div class="menu-popover hidden" id="note-menu">
       <button id="rename-note" data-i18n="Rename note">Rename note</button
       ><button id="delete-note" class="danger" data-i18n="Delete note">Delete note</button>
     </div>
     <script src="/assets/vendor/markdown-it-15.0.2.min.js" defer></script>
     <script src="/assets/i18n.js" defer></script>
-    <script src="/assets/app.js" defer></script>
+    <script src="/assets/app.js?v=20261026-maintenance-settings-note-times" defer></script>
   </body>
 </html>

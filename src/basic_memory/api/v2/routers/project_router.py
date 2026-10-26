@@ -11,11 +11,13 @@ Key improvements:
 """
 
 from contextlib import nullcontext
+from datetime import UTC, datetime, timedelta
 import os
 from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Body, Query, Path
 from loguru import logger
+from sqlalchemy import func, select
 
 from basic_memory import db
 from basic_memory.deps import (
@@ -34,6 +36,7 @@ from basic_memory.index.local_project import ProjectIndexRouteRequest
 from basic_memory.read_cache import invalidate_cache
 from basic_memory.schemas import ProjectIndexStatusResponse
 from basic_memory.models import Project
+from basic_memory.models.project import AcceptedProjectNoteChange
 from basic_memory.schemas.doctor import ProjectDoctorReport
 from basic_memory.services.project_doctor import diagnose_project
 from basic_memory.repository.project_repository import ProjectRepository
@@ -49,10 +52,189 @@ from basic_memory.schemas.v2 import (
     ProjectResolveRequest,
     ProjectResolveResponse,
 )
-from basic_memory.utils import normalize_project_path, generate_permalink
+from basic_memory.utils import normalize_project_path, generate_permalink, ensure_timezone_aware
+from basic_memory.schemas.v2.maintenance import (
+    ChangedMemoryNote,
+    MemoryMaintenanceCompletion,
+    MemoryMaintenanceCompletionResponse,
+    MemoryMaintenanceSettings,
+    MemoryMaintenanceStatus,
+)
 
 router = APIRouter(prefix="/projects", tags=["project_management-v2"])
 ProjectResolveMethod = Literal["external_id", "name", "permalink"]
+
+
+@router.get("/{project_id}/memory-maintenance", response_model=MemoryMaintenanceStatus)
+async def get_memory_maintenance_status(
+    project: ProjectExternalIdPathDep,
+    session: SessionDep,
+    project_id: str = Path(..., description="Project external ID (UUID)"),
+    batch_size: int = Query(20, ge=1, le=100),
+) -> MemoryMaintenanceStatus:
+    """Return a bounded, read-only maintenance signal from accepted note changes."""
+    project_row = await session.get(Project, project)
+    if project_row is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    changed_note_count = int(
+        await session.scalar(
+            select(func.count(func.distinct(AcceptedProjectNoteChange.note_external_id))).where(
+                AcceptedProjectNoteChange.project_id == project,
+                AcceptedProjectNoteChange.partition_position
+                > project_row.memory_maintenance_position,
+            )
+        )
+        or 0
+    )
+    first_positions = (
+        select(
+            AcceptedProjectNoteChange.note_external_id.label("note_external_id"),
+            func.min(AcceptedProjectNoteChange.partition_position).label("first_position"),
+        )
+        .where(
+            AcceptedProjectNoteChange.project_id == project,
+            AcceptedProjectNoteChange.partition_position > project_row.memory_maintenance_position,
+        )
+        .group_by(AcceptedProjectNoteChange.note_external_id)
+        .order_by("first_position")
+        .limit(batch_size)
+        .subquery()
+    )
+    batch_note_ids = list((await session.scalars(select(first_positions.c.note_external_id))).all())
+    through_position = int(
+        await session.scalar(select(func.max(first_positions.c.first_position)))
+        or project_row.memory_maintenance_position
+    )
+    latest_positions = (
+        select(
+            AcceptedProjectNoteChange.note_external_id.label("note_external_id"),
+            func.max(AcceptedProjectNoteChange.partition_position).label("latest_position"),
+        )
+        .where(
+            AcceptedProjectNoteChange.project_id == project,
+            AcceptedProjectNoteChange.note_external_id.in_(batch_note_ids),
+            AcceptedProjectNoteChange.partition_position <= through_position,
+        )
+        .group_by(AcceptedProjectNoteChange.note_external_id)
+        .subquery()
+    )
+    bounded_changes = (
+        list(
+            (
+                await session.scalars(
+                    select(AcceptedProjectNoteChange).join(
+                        latest_positions,
+                        (
+                            AcceptedProjectNoteChange.note_external_id
+                            == latest_positions.c.note_external_id
+                        )
+                        & (
+                            AcceptedProjectNoteChange.partition_position
+                            == latest_positions.c.latest_position
+                        ),
+                    )
+                )
+            ).all()
+        )
+        if batch_note_ids
+        else []
+    )
+    now = datetime.now(UTC)
+    baseline = ensure_timezone_aware(
+        project_row.memory_maintenance_completed_at
+        or project_row.memory_maintenance_baseline_at
+        or project_row.created_at
+    )
+    elapsed = now - baseline
+    due_by_count = changed_note_count >= project_row.memory_maintenance_note_threshold
+    due_by_time = elapsed >= timedelta(days=project_row.memory_maintenance_interval_days)
+    reason = "count" if due_by_count else "time" if due_by_time else None
+    return MemoryMaintenanceStatus(
+        project_id=project_row.external_id,
+        project_name=project_row.name,
+        due=reason is not None,
+        reason=reason,
+        changed_note_count=changed_note_count,
+        after_position=project_row.memory_maintenance_position,
+        through_position=through_position,
+        last_completed_at=project_row.memory_maintenance_completed_at,
+        changed_notes=[
+            ChangedMemoryNote(
+                external_id=item.note_external_id,
+                permalink=item.permalink,
+                title=item.title,
+                operation=item.operation,
+                partition_position=item.partition_position,
+            )
+            for item in bounded_changes
+        ],
+    )
+
+
+@router.get(
+    "/{project_id}/memory-maintenance/settings",
+    response_model=MemoryMaintenanceSettings,
+)
+async def get_memory_maintenance_settings(
+    project: ProjectExternalIdPathDep,
+    session: SessionDep,
+) -> MemoryMaintenanceSettings:
+    """Read the per-project time and note-count triggers."""
+    project_row = await session.get(Project, project)
+    if project_row is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return MemoryMaintenanceSettings(
+        interval_days=project_row.memory_maintenance_interval_days,
+        note_threshold=project_row.memory_maintenance_note_threshold,
+    )
+
+
+@router.put(
+    "/{project_id}/memory-maintenance/settings",
+    response_model=MemoryMaintenanceSettings,
+)
+async def update_memory_maintenance_settings(
+    settings: MemoryMaintenanceSettings,
+    project: ProjectExternalIdPathDep,
+    session: SessionDep,
+) -> MemoryMaintenanceSettings:
+    """Persist project-specific memory-maintenance thresholds."""
+    project_row = await session.get(Project, project)
+    if project_row is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project_row.memory_maintenance_interval_days = settings.interval_days
+    project_row.memory_maintenance_note_threshold = settings.note_threshold
+    await session.commit()
+    return settings
+
+
+@router.post(
+    "/{project_id}/memory-maintenance/complete",
+    response_model=MemoryMaintenanceCompletionResponse,
+)
+async def complete_memory_maintenance(
+    payload: MemoryMaintenanceCompletion,
+    project: ProjectExternalIdPathDep,
+    session: SessionDep,
+    project_id: str = Path(..., description="Project external ID (UUID)"),
+) -> MemoryMaintenanceCompletionResponse:
+    """Advance a project's checkpoint after an agent finishes a bounded batch."""
+    project_row = await session.get(Project, project)
+    if project_row is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if payload.through_position > project_row.partition_position:
+        raise HTTPException(status_code=409, detail="Checkpoint exceeds accepted project changes")
+    if payload.through_position < project_row.memory_maintenance_position:
+        raise HTTPException(status_code=409, detail="Checkpoint cannot move backwards")
+    completed_at = datetime.now(UTC)
+    project_row.memory_maintenance_position = payload.through_position
+    project_row.memory_maintenance_completed_at = completed_at
+    await session.commit()
+    return MemoryMaintenanceCompletionResponse(
+        project_id=project_row.external_id,
+        through_position=payload.through_position,
+        completed_at=completed_at,
+    )
 
 
 def _split_qualified_project_identifier(identifier: str) -> tuple[str | None, str]:

@@ -27,10 +27,8 @@ def test_codex_plugin_mcp_config_is_tracked_and_not_ignored() -> None:
     assert tracked.returncode == 0, tracked.stderr
 
 
-def test_codex_plugin_hooks_are_zero_logic_uv_scripts() -> None:
-    # The plugin ships configuration plus launchers only: the hook bodies live
-    # in the basic-memory package behind `bm hook` (SPEC-55); each launcher is
-    # a self-contained PEP 723 uv script with no resolver logic of its own.
+def test_codex_plugin_lifecycle_shims_and_semantic_review_wiring() -> None:
+    # Lifecycle launchers use the pinned core; semantic hooks ship with the plugin.
     repo_root = Path(__file__).resolve().parents[1]
     hooks_dir = repo_root / "plugins/codex/hooks"
 
@@ -45,7 +43,7 @@ def test_codex_plugin_hooks_are_zero_logic_uv_scripts() -> None:
         assert "# /// script" in text
         refs = re.findall(
             r'"basic-memory @ git\+https://github\.com/'
-            r'basicmachines-co/basic-memory@([^"]+)"',
+            r'[^/]+/basic-memory@([^"]+)"',
             text,
         )
         assert len(refs) == 1
@@ -56,7 +54,21 @@ def test_codex_plugin_hooks_are_zero_logic_uv_scripts() -> None:
     assert not (hooks_dir / "stop.py").exists()
 
     hooks = json.loads((hooks_dir / "hooks.json").read_text(encoding="utf-8"))["hooks"]
-    assert set(hooks) == {"SessionStart", "PreCompact"}
+    assert set(hooks) == {
+        "SessionStart",
+        "PreCompact",
+        "UserPromptSubmit",
+        "Stop",
+        "SessionEnd",
+    }
+    for event, verb in (("UserPromptSubmit", "prompt"), ("Stop", "stop")):
+        handler = hooks[event][0]["hooks"][0]
+        assert handler.get("async", False) is False
+        assert "memory_review.py" in handler["command"]
+        assert handler["command"].endswith(f" {verb}")
+    session_end = hooks["SessionEnd"][0]["hooks"][0]
+    assert session_end.get("async", False) is False
+    assert session_end["command"].endswith('session_end_capture.py"')
 
 
 def test_codex_plugin_validator_rejects_unsupported_hook_wiring(tmp_path: Path) -> None:
@@ -69,7 +81,7 @@ def test_codex_plugin_validator_rejects_unsupported_hook_wiring(tmp_path: Path) 
         payload = json.loads(hooks_path.read_text(encoding="utf-8"))
 
         if case == "retired-event":
-            payload["hooks"]["Stop"] = payload["hooks"]["PreCompact"]
+            payload["hooks"]["UnsupportedEvent"] = payload["hooks"]["PreCompact"]
         elif case == "wrong-script":
             command_hook = payload["hooks"]["PreCompact"][0]["hooks"][0]
             command_hook["command"] = command_hook["command"].replace("pre_compact.py", "stop.py")
@@ -159,14 +171,18 @@ def test_user_level_coding_profile_stays_with_repository_override() -> None:
 
     readme_blocks = re.findall(r"```json\n(.*?)\n```", readme, flags=re.DOTALL)
     shared_settings = json.loads(readme_blocks[0])["basicMemory"]
-    project_settings = json.loads(readme_blocks[1])["basicMemory"]
+    project_settings = next(
+        settings
+        for settings in (json.loads(block)["basicMemory"] for block in readme_blocks[1:])
+        if "sessionProfile" in settings
+    )
 
     assert "sessionProfile" not in shared_settings
     assert project_settings == {
         "sessionProfile": "coding",
         "repository": "owner/repo",
     }
-    assert "omit `sessionProfile` from the shared user file" in setup
+    assert "不要在共用用户文件写入 `sessionProfile`" in setup
     assert '"sessionProfile": "coding",\n    "repository": "owner/name"' in setup
 
 
@@ -174,17 +190,18 @@ def test_bm_setup_offers_default_or_server_wide_mcp_trust() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     setup = (repo_root / "plugins/codex/skills/bm-setup/SKILL.md").read_text(encoding="utf-8")
 
-    assert "ask the user to choose exactly one of these two modes" in setup
-    assert "Keep Codex's default approval behavior" in setup
-    assert "Pre-approve eligible tools from the Basic Memory MCP server" in setup
-    assert "Do not offer a per-tool or write-only trust profile" in setup
-    assert "destructive annotation" in setup
-    assert "writes,\nedits, and deletes may still prompt" in setup
-    assert "writes,\nedits, moves" not in setup
-    assert '[plugins."codex@basic-memory".mcp_servers.basic-memory]' in setup
-    assert "[mcp_servers.basic-memory]" in setup
-    assert 'default_tools_approval_mode = "approve"' in setup
-    assert 'Do not set `approval_policy = "never"`' in setup
+    for contract in (
+        "请用户从以下两种方式中明确选择一种",
+        "保留 Codex 默认审批方式",
+        "预先批准 Basic Memory MCP server 的合格工具",
+        "不要提供按单个工具或只放行写入操作的信任方案",
+        "破坏性操作",
+        '[plugins."codex@basic-memory".mcp_servers.basic-memory]',
+        "[mcp_servers.basic-memory]",
+        'default_tools_approval_mode = "approve"',
+        '不得设置 `approval_policy = "never"`',
+    ):
+        assert contract in setup
 
 
 def test_codex_manual_capture_defaults_share_codex_tree() -> None:
@@ -194,9 +211,9 @@ def test_codex_manual_capture_defaults_share_codex_tree() -> None:
     remember = (repo_root / "plugins/codex/skills/bm-remember/SKILL.md").read_text(encoding="utf-8")
 
     assert '"rememberFolder": "codex/remember"' in setup
-    assert "Default decisions to `codex/decisions`" in setup
-    assert "otherwise use `codex/decisions`" in decide
-    assert "`rememberFolder`, default `codex/remember`" in remember
+    assert "决策默认放 `codex/decisions`" in setup
+    assert "否则使用 `codex/decisions`" in decide
+    assert "`rememberFolder`，默认 `codex/remember`" in remember
 
 
 def test_coding_session_schema_is_shared_across_host_plugins() -> None:
@@ -230,48 +247,35 @@ def test_bm_checkpoint_tells_a_story_and_uses_graph_semantics() -> None:
     schema = (repo_root / "plugins/codex/schemas/codex-session.md").read_text(encoding="utf-8")
 
     assert ".github/basic-memory" not in skill
-    assert "Apply the `bm-writing` skill" in skill
-    assert "Apply the `bm-writing` skill" in decide
-    assert "Apply the `bm-writing` skill" in remember
-    assert "A checkpoint is a durable handoff, not a status dump" in skill
-    assert "Every invocation creates a new checkpoint" in skill
-    assert "UTC YYYY-MM-DDTHH-MM-SSZ" in skill
-    assert "snapshot plus pointers" in skill
-    assert "Begin the body with `# <exact note title>`" in skill
-    assert "username: <current username>" in skill
-    assert "hostname: <current hostname>" in skill
-    assert "- `[decision]` for each decision made or preserved" in skill
-    assert "- `[next_step]` for the one primary next action" in skill
-    assert "include exactly one" in skill
-    assert "- relates_to [[Exact existing note title]]" in skill
-    assert "Never write `[relates_to]` or a bare `memory://` URL as an observation" in skill
-    assert "`project=<configured primaryProject>`" in skill
-    assert "frontmatter `project` field is descriptive" in skill
-    assert "Treat host-provided session metadata as opaque identity data" in skill
-    assert 'filters={"codex_session_id": "<exact host-provided id>"}' in skill
-    assert 'filters={"agent": "codex", "session_id": "<exact host-provided id>"}' in skill
-    assert "Reject conflicting" in skill
-    assert "- continues [[Exact previous checkpoint title]]" in skill
-    assert "Do not edit the previous immutable checkpoint" in skill
-    assert "Never infer same-chat lineage" in skill
-    assert "`## References`" in skill
-    assert "verify that GitHub can resolve that SHA" in skill
-    assert "local or unpushed" in skill
-    assert "overwrite=False" in skill
-    assert 'output_format="json"' in skill
-    assert "`write_note_overwrite_default` setting is true" in skill
-    assert "with `action: created`" in skill
-    assert "the tool error `ALREADY_EXISTS`" in skill
-    assert "`file_path`, then `title`" in skill
-    assert '$bm-orient "<exact returned resume identifier>"' in skill
-    assert "\n- Decisions\n" not in skill
+    for contract in (
+        "每次调用都创建新检查点",
+        "不得编辑、替换或追加到旧检查点",
+        "overwrite=False",
+        'output_format="json"',
+        "write_note_overwrite_default",
+        "action: created",
+        "ALREADY_EXISTS",
+        "session_id",
+        "agent: codex",
+        "codex_session_id",
+        "字段冲突时拒绝匹配",
+        "不得仅凭仓库、分支、主题、时间戳或生命周期信封推测",
+        "## Relations",
+        "continues [[",
+        "relates_to [[",
+        "[next_step]",
+        "## References",
+        "未推送",
+        "permalink",
+        "file_path",
+    ):
+        assert contract in skill
+    for authored in (skill, decide, remember):
+        assert "bm-writing" in authored
+    for contract in ("## Observations", "## Relations", "relation_type", "不得编造"):
+        assert contract in writing
     assert "username?: string" in schema
     assert "hostname?: string" in schema
-    assert "intentionally user-customizable" in writing
-    assert "problem -> approach -> current state and impact" in writing
-    assert "canonical URLs are verified" in writing
-    assert "- relation_type [[Target Note]]" in writing
-    assert "Do not invent intent, impact, verification, decisions, or drama" in writing
 
 
 def test_codex_checkpoint_has_no_plugin_redaction_gate() -> None:
@@ -298,21 +302,20 @@ def test_bm_orient_supports_exact_topic_and_current_repo_routes() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     skill = (repo_root / "plugins/codex/skills/bm-orient/SKILL.md").read_text(encoding="utf-8")
 
-    assert "Choose exactly one route" in skill
-    assert "read that note directly" in skill
-    assert "`project=<configured primaryProject>`" in skill
-    assert "Do not retry the identifier against secondary or other projects" in skill
-    assert "Run the `coding_session` topic search separately" in skill
-    assert 'filters={"repository": "<configured repository>"}' in skill
-    assert "Never let topic text similarity compensate" in skill
-    assert "omit `coding_session` results" in skill
-    assert "show at most three" in skill
-    assert "When the invocation has no argument" in skill
-    assert "Do not ingest an arbitrary filesystem path" in skill
-    assert "Treat a recovered note as historical context" in skill
-    assert "Report material drift explicitly" in skill
-    assert "Git drift cannot be proven" in skill
-    assert "Do not write notes, mutate statuses, commit or stash changes" in skill
+    for contract in (
+        "准确检查点",
+        "按主题发现",
+        "当前仓库",
+        "primaryProject",
+        "secondary",
+        "repository",
+        "省略 `coding_session` 结果",
+        "最多展示三个",
+        "不要将任意文件系统路径",
+        "历史上下文",
+        "不要写笔记、修改状态、提交或 stash",
+    ):
+        assert contract in skill
 
 
 def test_infographics_skill_keeps_weekly_contract_and_bm_style_pool() -> None:

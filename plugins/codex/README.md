@@ -12,15 +12,22 @@ verification, decision capture, and resumable checkpoints.
 ## What It Does
 
 - **Orient from memory.** The `bm-orient` skill reads active tasks, open
-  decisions, and recent Codex checkpoints before substantial work.
+  decisions, and recent Codex checkpoints before substantial work, then uses
+  hybrid semantic retrieval to find relevant prior decisions and constraints.
 - **Checkpoint work after compaction.** The post-compaction `SessionStart`
   context asks the resumed Codex turn to run `bm-checkpoint`.
   The resulting `codex_session` or `coding_session` note is agent-authored from
   the compacted working context, with repository and pull-request evidence.
 - **Capture decisions.** The `bm-decide` skill records durable engineering
-  decisions with rationale, alternatives, and consequences.
+  decisions when they are settled, with rationale, alternatives, consequences,
+  and links to decisions they replace.
 - **Remember lightly.** The `bm-remember` skill saves small facts without turning
-  them into a full decision or session note.
+  them into a full decision or session note; it checks for an existing note
+  before creating one and updates the existing note when appropriate.
+- **Curate the graph.** The `bm-curate` skill audits duplicates, stale or
+  contradictory notes, missing links, tags, and folder placement. It proposes
+  a bounded plan before broad edits and preserves old notes unless removal is
+  explicitly requested.
 - **Write useful memory.** The `bm-writing` skill provides one user-customizable
   standard for the voice, narrative quality, observations, and relations used by
   the plugin's note-writing skills.
@@ -69,19 +76,90 @@ request, issue, and pushed-commit references use verified canonical GitHub
 links. Local or unpushed SHAs remain labeled code references instead of links
 that would not resolve.
 
+## Capture, Curation, and Recall
+
+Capture durable information when it becomes clear: use `bm-decide` for a settled
+engineering choice and `bm-remember` for an explicit save request or a clear,
+long-lived preference. Search for an existing note first and update it when the
+new information belongs to the same fact or decision. Do not save incidental
+conversation, guesses, or temporary state. Credential capture follows the
+user's policy for the target project; a self-hosted personal vault may retain
+credentials the user wants to reuse. Do not extract credentials from unrelated
+logs or share them to team projects automatically. Compaction checkpoints
+preserve work continuity; they are separate immutable snapshots and do not
+replace topic notes.
+
+For substantial work, `bm-orient` combines structured searches for active tasks,
+open decisions, and recent sessions with a small hybrid search for the task's
+specific concepts. Exact identifiers and statuses use exact/metadata search;
+semantic results are candidate pointers that must be read and checked against
+current evidence. If semantic search is unavailable, the skill falls back to
+full-text search. Embeddings improve discovery; they do not decide which notes
+are true, current, or safe to merge.
+
+`bm-curate` is an agent-invoked maintenance workflow, not a background LLM
+service. It can find likely duplicates, stale or conflicting notes, orphans,
+and inconsistent tags, then propose or apply scoped edits according to the
+user's request. It does not guarantee that every note is always current.
+
+## Semantic Turn Capture
+
+The synchronous UserPromptSubmit/Stop hooks use `bm-capture` to ask the current
+Codex turn to identify durable information from context, search existing notes,
+and save through `bm-remember` or `bm-decide`. No keyword match or message-length
+cutoff is required. A local receipt distinguishes saved, no_memory, pending,
+unresolved and expired. The agent completes its check before the final reply.
+Stop only marks missing receipts as unresolved and returns without blocking or
+creating a visible continuation prompt. A later turn in the same directory and
+configured project can recover them; without a later turn, recovery is deferred.
+
+Failed drafts are retried by subsequent Codex turns in the same directory and
+configured project after backoff, with fresh deduplication before writing. They
+expire after seven days. This is an agent-driven queue, not an unattended
+background delivery service. Receipts report agent-confirmed MCP results; the
+hook does not independently verify server persistence. No raw prompt or reply
+is cached. Set `basicMemory.semanticCapture` to JSON `false` to opt out.
+
+The `bm_memory_maintenance` tool exposes a project change watermark and a bounded
+batch of accepted note changes. It only reports and acknowledges progress; the
+agent performs all reading, judgment, and note edits. The tool does not start a
+background agent. A future Codex turn must check the status and work through the
+batch for maintenance to happen. Defaults are 20 distinct changed notes or 14
+days, with batches capped at 20 notes.
+Set `basicMemory.memoryMaintenance` to JSON `true` to have the next user turn
+check status after the current request has been handled. This setting is false
+by default and currently requires semantic capture to be enabled as well.
+
+The synchronous `SessionEnd` hook can save the last user request and its complete
+final answer as a `pending_review` note under `codex/inbox`. It only runs when
+`basicMemory.sessionEndInbox` is the JSON boolean `true` in the nearest project
+configuration; it is off by default. The hook skips sessions without a completed
+final answer and does not save intermediate assistant messages. A successful
+write is a raw handoff for later agent review, not an accepted memory decision.
+The full exchange is stored, so sensitive material in that request or answer is
+also included. If the MCP endpoint is unavailable or the write fails, the hook
+logs a content-free diagnostic and allows session closure; it does not guarantee
+delivery or retry without a later Codex run. SessionEnd may be delayed after
+inactivity and does not run merely because the user switches conversations.
+
+See [语义捕捉说明](../../docs/codex-semantic-capture-zh.md) for receipt states,
+configuration, recovery, and migration from the old keyword-based Stop handler.
+
 ## Package Contents
 
 | Path | Role |
 | --- | --- |
 | `.codex-plugin/plugin.json` | Codex plugin manifest |
 | `.mcp.json` | Basic Memory MCP server configuration |
-| `hooks/hooks.json` | SessionStart and PreCompact registration |
+| `hooks/hooks.json` | SessionStart, PreCompact, UserPromptSubmit, Stop and SessionEnd registration |
 | `hooks/session_start.py` | uv script: runs `basic-memory hook session-start --harness codex` |
 | `hooks/pre_compact.py` | uv script: runs `basic-memory hook pre-compact --harness codex` |
+| `hooks/memory_review.py` | Dependency-free semantic review receipts and retry state |
+| `hooks/session_end_capture.py` | Dependency-free SessionEnd capture into the review inbox |
 | `skills/` | Codex-native Basic Memory workflows |
 | `schemas/` | Seed schemas for Codex sessions, decisions, and tasks |
 
-The hook scripts carry no logic: the brief, checkpoint prompting, and
+The SessionStart and PreCompact hook launchers carry no logic: the brief, checkpoint prompting, and
 lifecycle-event capture all live in the pinned Basic Memory revision behind
 `bm hook`. Each is a self-contained PEP 723 script pinned to a Basic Memory Git
 ref. All refs are updated together with
@@ -270,6 +348,8 @@ Run the setup skill, or create `~/.codex/basic-memory.json` for shared defaults:
     "recallTimeframe": "7d",
     "checkpointOnCompact": true,
     "captureEvents": true,
+    "semanticCapture": true,
+    "sessionEndInbox": false,
     "placementConventions": "Put decisions in codex/decisions/ and work checkpoints in codex/<repo-dir>/."
   }
 }
@@ -296,6 +376,20 @@ writes to `codex/<repo-dir>`. An explicit folder still wins.
 Decision notes default to `codex/decisions`, and lightweight `bm-remember`
 captures default to `codex/remember`. Project placement conventions and an
 explicit `rememberFolder` can override those destinations.
+
+Enable end-of-session inbox capture only for a project that should retain the
+last exchange:
+
+```json
+{
+  "basicMemory": {
+    "sessionEndInbox": true
+  }
+}
+```
+
+The setting can live in that project's `.codex/basic-memory.json`; it does not
+need to be enabled globally.
 
 For a coding profile, keep both the profile and checkout-specific repository
 identifier in the project file without duplicating the shared settings:

@@ -2,6 +2,7 @@ const state = {
   projects: [],
   project: null,
   tree: null,
+  treeSignature: "",
   notes: [],
   selected: null,
   folder: "/",
@@ -15,6 +16,7 @@ const state = {
   searchIndex: 0,
   graph: null,
   saveTimer: null,
+  movingNoteId: null,
 };
 const $ = (id) => document.getElementById(id);
 const t = (value) => window.basicMemoryI18n.t(value);
@@ -22,6 +24,8 @@ const graphBaseViewBox = { x: 0, y: 0, width: 900, height: 560 };
 let graphViewBox = { ...graphBaseViewBox };
 let graphPointer = null;
 let lastGraphDragAt = 0;
+let graphCleanup = () => {};
+let graphRenderVersion = 0;
 const markdownParser = window.markdownit({ html: false, linkify: true });
 markdownParser.inline.ruler.before(
   "link",
@@ -126,6 +130,8 @@ const fmtDate = (value) => {
     : new Intl.DateTimeFormat(window.basicMemoryI18n.locale, {
         month: "short",
         day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
       }).format(date);
 };
 const renderMarkdownBody = (source) => markdownParser.render(source || "");
@@ -230,6 +236,17 @@ const getAllNotes = (node, output = []) => {
   return output;
 };
 const relativeDir = (value = "/") => value.replace(/^\/+|\/+$/g, "");
+const noteTreeSignature = (tree) =>
+  JSON.stringify(
+    getAllNotes(tree)
+      .map((note) => ({
+        external_id: note.external_id || "",
+        file_path: note.file_path,
+        title: note.title,
+        updated_at: note.updated_at,
+      }))
+      .sort((a, b) => a.external_id.localeCompare(b.external_id)),
+  );
 
 async function boot() {
   try {
@@ -262,11 +279,139 @@ async function reloadProject() {
   $("search-project-label").textContent = state.project.name;
   state.folder = "/";
   state.tree = await api(`${projectPath()}/directory/tree`);
+  state.treeSignature = noteTreeSignature(state.tree);
   state.notes = getAllNotes(state.tree).sort(
     (a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0),
   );
   renderTree();
   renderNotes();
+}
+
+async function openMaintenanceSettings() {
+  try {
+    const settings = await api(`${projectPath()}/memory-maintenance/settings`, {
+      cache: "no-store",
+    });
+    $("maintenance-interval-days").value = settings.interval_days;
+    $("maintenance-note-threshold").value = settings.note_threshold;
+    $("maintenance-modal").classList.remove("hidden");
+    $("maintenance-interval-days").focus();
+  } catch (error) {
+    toast(`${t("Could not load settings: ")}${error.message}`);
+  }
+}
+
+async function saveMaintenanceSettings(event) {
+  event.preventDefault();
+  const intervalDays = Number($("maintenance-interval-days").value);
+  const noteThreshold = Number($("maintenance-note-threshold").value);
+  if (
+    !Number.isInteger(intervalDays) ||
+    intervalDays < 1 ||
+    intervalDays > 365 ||
+    !Number.isInteger(noteThreshold) ||
+    noteThreshold < 1 ||
+    noteThreshold > 1000
+  ) {
+    toast(t("Please enter valid thresholds."));
+    return;
+  }
+
+  const save = $("maintenance-save");
+  save.disabled = true;
+  try {
+    await api(`${projectPath()}/memory-maintenance/settings`, {
+      method: "PUT",
+      body: JSON.stringify({
+        interval_days: intervalDays,
+        note_threshold: noteThreshold,
+      }),
+    });
+    $("maintenance-modal").classList.add("hidden");
+    toast(t("Settings saved"));
+  } catch (error) {
+    toast(`${t("Could not save settings: ")}${error.message}`);
+  } finally {
+    save.disabled = false;
+  }
+}
+
+async function refreshProjectIfChanged() {
+  if (!state.project || document.hidden || refreshProjectIfChanged.inFlight)
+    return;
+  refreshProjectIfChanged.inFlight = true;
+  const projectId = state.project.external_id;
+  const projectUrl = `/v2/projects/${encodeURIComponent(projectId)}`;
+  try {
+    const tree = await api(`${projectUrl}/directory/tree`, { cache: "no-store" });
+    if (state.project?.external_id !== projectId) return;
+    const signature = noteTreeSignature(tree);
+    if (signature === state.treeSignature) return;
+
+    state.tree = tree;
+    state.treeSignature = signature;
+    state.notes = getAllNotes(tree).sort(
+      (a, b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0),
+    );
+    renderTree();
+    renderNotes();
+    if (state.view === "activity") renderActivity();
+    if (state.view === "graph") renderGraph();
+
+    const selectedId = state.selected?.external_id;
+    if (!selectedId || state.dirty) return;
+    const selectedStillExists = state.notes.some(
+      (note) => note.external_id === selectedId,
+    );
+    if (!selectedStillExists) {
+      state.selected = null;
+      $("note-workspace").classList.add("hidden");
+      if (state.view !== "graph" && state.view !== "activity")
+        $("welcome-state").classList.remove("hidden");
+      history.replaceState(null, "", "/");
+      return;
+    }
+
+    const current = state.selected;
+    const latest = await api(
+      `${projectUrl}/knowledge/entities/${encodeURIComponent(selectedId)}`,
+      { cache: "no-store" },
+    );
+    if (
+      state.project?.external_id !== projectId ||
+      state.selected?.external_id !== selectedId ||
+      state.selected !== current ||
+      state.dirty ||
+      (latest.content === current.content &&
+        latest.title === current.title &&
+        latest.file_path === current.file_path &&
+        latest.updated_at === current.updated_at)
+    )
+      return;
+
+    state.selected = latest;
+    $("note-title").value = latest.title || "";
+    $("note-source").value = latest.content || "";
+    if (state.mode === "rich") hydrateRichEditor();
+    $("note-type-badge").textContent = (latest.note_type || "note").toUpperCase();
+    $("file-path").textContent = latest.file_path || "";
+    $("breadcrumbs").innerHTML =
+      `<span>${esc(state.project.name)}</span>  /  ${esc(latest.file_path || "")}`;
+    $("save-status").textContent = t("Saved");
+    renderRelations();
+    renderEditor();
+  } catch {
+    // External sync can briefly lag behind the file write; the next poll retries.
+  } finally {
+    refreshProjectIfChanged.inFlight = false;
+  }
+}
+
+function startLiveUpdates() {
+  window.setInterval(refreshProjectIfChanged, 5000);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refreshProjectIfChanged();
+  });
 }
 
 function renderTree() {
@@ -276,7 +421,7 @@ function renderTree() {
     if (node.type === "file") {
       if (!(node.content_type || "").includes("markdown") || !node.external_id)
         return "";
-      return `<button type="button" class="tree-row tree-file-row ${state.selected?.external_id === node.external_id ? "selected" : ""}" data-level="${level}" data-note="${esc(node.external_id)}" style="--tree-depth:${Math.min(level, 8)};padding-left:${8 + Math.min(level, 8) * 16}px" title="${esc(node.file_path || node.name)}"><span class="tree-caret"></span><span class="file-icon">▱</span><span class="tree-name">${esc(fileTitle(node))}</span></button>`;
+      return `<button type="button" draggable="true" class="tree-row tree-file-row ${state.selected?.external_id === node.external_id ? "selected" : ""} ${state.movingNoteId === node.external_id ? "moving" : ""}" data-level="${level}" data-note="${esc(node.external_id)}" style="--tree-depth:${Math.min(level, 8)};padding-left:${8 + Math.min(level, 8) * 16}px;opacity:${state.movingNoteId === node.external_id ? 0.55 : 1}" title="${esc(t("Drag to move note"))} · ${esc(node.file_path || node.name)}"><span class="tree-caret"></span><span class="file-icon">▱</span><span class="tree-name">${esc(fileTitle(node))}</span></button>`;
     }
     const path = node.directory_path || "/";
     const children = node.children || [];
@@ -306,8 +451,100 @@ function renderTree() {
     }),
   );
   tree.querySelectorAll("[data-note]").forEach((element) =>
-    element.addEventListener("click", () => openNote(element.dataset.note)),
+    {
+      element.addEventListener("click", () => openNote(element.dataset.note));
+      element.addEventListener("dragstart", (event) => {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", element.dataset.note);
+        element.classList.add("dragging");
+        element.style.opacity = "0.55";
+      });
+      element.addEventListener("dragend", () => {
+        element.classList.remove("dragging");
+        element.style.opacity = "";
+      });
+    },
   );
+  tree.querySelectorAll("[data-folder]").forEach((element) => {
+    element.title = t("Drop a note here to move it");
+    element.addEventListener("dragover", (event) => {
+      if (!Array.from(event.dataTransfer.types).includes("text/plain")) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = "move";
+      element.classList.add("drop-target");
+      element.style.backgroundColor = "var(--surface-raised, rgba(70, 130, 90, 0.14))";
+      element.style.boxShadow = "inset 3px 0 var(--accent, #4a8c68)";
+    });
+    element.addEventListener("dragleave", (event) => {
+      if (!element.contains(event.relatedTarget)) {
+        element.classList.remove("drop-target");
+        element.style.backgroundColor = "";
+        element.style.boxShadow = "";
+      }
+    });
+    element.addEventListener("drop", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      element.classList.remove("drop-target");
+      element.style.backgroundColor = "";
+      element.style.boxShadow = "";
+      const noteId = event.dataTransfer.getData("text/plain");
+      if (noteId) moveNoteToFolder(noteId, element.dataset.folder);
+    });
+  });
+}
+
+async function moveNoteToFolder(noteId, destinationFolder) {
+  if (state.movingNoteId) return;
+  const note = state.notes.find((item) => item.external_id === noteId);
+  if (!note) return;
+  const filename = (note.file_path || "").split("/").pop();
+  if (!filename) return;
+  const destinationPath = [relativeDir(destinationFolder), filename].filter(Boolean).join("/");
+  if (destinationPath === note.file_path) return;
+
+  state.movingNoteId = noteId;
+  renderTree();
+  let moveAccepted = false;
+  try {
+    if (state.selected?.external_id === noteId && state.dirty) {
+      clearTimeout(state.saveTimer);
+      await saveNote();
+      if (state.dirty) throw new Error(t("Save the note before moving it"));
+    }
+    const current = await api(
+      `${projectPath()}/knowledge/entities/${encodeURIComponent(noteId)}`,
+      { cache: "no-store" },
+    );
+    const moved = await api(
+      `${projectPath()}/knowledge/entities/${encodeURIComponent(noteId)}/move`,
+      {
+        method: "PUT",
+        headers: current.db_checksum
+          ? { "x-bm-cloud-note-base-checksum": current.db_checksum }
+          : {},
+        body: JSON.stringify({ destination_path: destinationPath }),
+      },
+    );
+    moveAccepted = true;
+    await reloadProject();
+    state.folder = destinationFolder;
+    renderTree();
+    renderNotes();
+    if (state.view === "activity") renderActivity();
+    if (state.view === "graph") renderGraph();
+    if (state.selected?.external_id === noteId) await openNote(noteId);
+    toast(t("Note moved"));
+    return moved;
+  } catch (error) {
+    const message = moveAccepted
+      ? `${t("Note moved, but refresh failed: ")}${error.message}`
+      : `${t("Could not move note: ")}${error.message}`;
+    toast(message);
+  } finally {
+    state.movingNoteId = null;
+    renderTree();
+  }
 }
 
 function visibleNotes() {
@@ -389,6 +626,10 @@ function setActiveNav(view) {
     );
 }
 function showView(view) {
+  if (view !== "graph") {
+    graphRenderVersion += 1;
+    graphCleanup();
+  }
   state.view = view;
   state.tab = view === "pinned" ? "pinned" : "all";
   if (view === "all" || view === "pinned") state.folder = "/";
@@ -435,6 +676,8 @@ async function openNote(id) {
     $("list-pane").classList.remove("mobile-open");
     $("sidebar").classList.remove("open");
     $("welcome-state").classList.add("hidden");
+    graphRenderVersion += 1;
+    graphCleanup();
     $("graph-workspace").classList.add("hidden");
     $("activity-workspace").classList.add("hidden");
     $("note-workspace").classList.remove("hidden");
@@ -847,12 +1090,167 @@ function updateGraphControlLanguage() {
     );
 }
 
+function graphNoteOverview(content, title) {
+  const body = splitFrontmatter(content).body;
+  const summary = body.match(
+    /^#{1,6}\s+(?:Summary|Overview|摘要|概述|简介)[ \t]*\r?\n([\s\S]*)/im,
+  );
+  const preview = document.createElement("div");
+  preview.innerHTML = markdownParser.render(summary ? summary[1].split(/^#{1,6}\s/m)[0] : body);
+  preview.querySelectorAll("h1,h2,h3,h4,h5,h6,pre,table").forEach((el) => el.remove());
+  let text = (preview.textContent || "").replace(/\s+/g, " ").trim();
+  if (text.startsWith(title)) text = text.slice(title.length).trim();
+  const characters = Array.from(text);
+  return characters.slice(0, 220).join("") + (characters.length > 220 ? "…" : "");
+}
+
+function animateGraph(canvas, svg, nodes, points, projectUrl) {
+  const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
+  const controller = new AbortController();
+  const previews = new Map();
+  const tooltip = document.createElement("div");
+  tooltip.className = "graph-tooltip";
+  tooltip.id = "graph-node-overview";
+  tooltip.role = "tooltip";
+  tooltip.hidden = true;
+  tooltip.innerHTML = '<div class="graph-tooltip-type"></div><div class="graph-tooltip-title"></div><p class="graph-tooltip-summary"></p>';
+  canvas.append(tooltip);
+  const nodeElements = [...svg.querySelectorAll("[data-graph-note]")];
+  const edgeElements = [...svg.querySelectorAll(".graph-edge")];
+  let active = null;
+  let hoverTimer;
+  let animationFrame;
+  let disposed = false;
+  const startedAt = performance.now();
+  let lastFrameAt = startedAt;
+
+  const positionTooltip = () => {
+    if (!active || tooltip.hidden) return;
+    const bounds = canvas.getBoundingClientRect();
+    const anchor = active.element.querySelector("circle").getBoundingClientRect();
+    const left = anchor.left - bounds.left + anchor.width / 2;
+    const above = anchor.top - bounds.top - tooltip.offsetHeight - 14;
+    tooltip.style.left = `${Math.max(12, Math.min(left - tooltip.offsetWidth / 2, canvas.clientWidth - tooltip.offsetWidth - 12))}px`;
+    tooltip.style.top = `${Math.max(12, Math.min(above >= 12 ? above : anchor.bottom - bounds.top + 14, canvas.clientHeight - tooltip.offsetHeight - 12))}px`;
+  };
+  const hideTooltip = () => {
+    clearTimeout(hoverTimer);
+    active?.element.removeAttribute("aria-describedby");
+    active = null;
+    tooltip.hidden = true;
+  };
+  const showTooltip = (node, element) => {
+    hideTooltip();
+    active = { node, element };
+    element.setAttribute("aria-describedby", tooltip.id);
+    const chinese = window.basicMemoryI18n.locale === "zh-CN";
+    tooltip.querySelector(".graph-tooltip-type").textContent = node.note_type || (chinese ? "笔记" : "Note");
+    tooltip.querySelector(".graph-tooltip-title").textContent = node.title;
+    const summary = tooltip.querySelector(".graph-tooltip-summary");
+    summary.textContent = chinese ? "正在读取概述…" : "Loading overview…";
+    tooltip.hidden = false;
+    positionTooltip();
+    hoverTimer = setTimeout(async () => {
+      try {
+        if (!previews.has(node.external_id)) {
+          previews.set(node.external_id, api(
+            `${projectUrl}/knowledge/entities/${encodeURIComponent(node.external_id)}`,
+            { signal: controller.signal },
+          ).catch((error) => {
+            previews.delete(node.external_id);
+            throw error;
+          }));
+        }
+        const note = await previews.get(node.external_id);
+        if (disposed || active?.element !== element) return;
+        summary.textContent = graphNoteOverview(note.content || "", node.title) ||
+          (chinese ? "这篇笔记还没有正文概述。" : "This note has no overview yet.");
+      } catch (error) {
+        if (disposed || active?.element !== element) return;
+        summary.textContent = chinese ? "暂时无法读取概述，点击节点打开笔记。" : "Overview unavailable. Open the note to read more.";
+      }
+      positionTooltip();
+    }, 160);
+  };
+
+  nodeElements.forEach((element, index) => {
+    const node = nodes[index];
+    element.addEventListener("pointerenter", (event) => {
+      if (event.pointerType !== "touch" && !graphPointer?.dragging) showTooltip(node, element);
+    });
+    element.addEventListener("pointerleave", () => {
+      if (document.activeElement !== element) hideTooltip();
+    });
+    element.addEventListener("focus", () => showTooltip(node, element));
+    element.addEventListener("blur", hideTooltip);
+    element.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") hideTooltip();
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        openNote(node.external_id);
+      }
+    });
+  });
+  const animate = (now) => {
+    if (disposed || !svg.isConnected || $("graph-workspace").classList.contains("hidden")) return;
+    const time = (now - startedAt) / 1000;
+    const smoothing = 1 - Math.exp(-Math.min(now - lastFrameAt, 50) / 220);
+    lastFrameAt = now;
+    nodes.forEach((node, index) => {
+      const point = points.get(node.external_id);
+      if (active?.node !== node && !graphPointer?.dragging) {
+        const phase = index * 2.399;
+        const dx = Math.sin(time * (0.42 + (index % 3) * 0.055) + phase) * (8 + index % 5);
+        const dy = Math.cos(time * (0.34 + (index % 4) * 0.04) + phase) * (6 + index % 4);
+        point.dx += (dx - point.dx) * smoothing;
+        point.dy += (dy - point.dy) * smoothing;
+      }
+      nodeElements[index].setAttribute("transform", `translate(${point.dx} ${point.dy})`);
+    });
+    edgeElements.forEach((element) => {
+      const a = points.get(element.dataset.from), b = points.get(element.dataset.to);
+      element.setAttribute("x1", a.x + a.dx);
+      element.setAttribute("y1", a.y + a.dy);
+      element.setAttribute("x2", b.x + b.dx);
+      element.setAttribute("y2", b.y + b.dy);
+    });
+    positionTooltip();
+    animationFrame = requestAnimationFrame(animate);
+  };
+  const updateMotion = () => {
+    cancelAnimationFrame(animationFrame);
+    if (!reducedMotion.matches) {
+      lastFrameAt = performance.now();
+      animationFrame = requestAnimationFrame(animate);
+    }
+  };
+  svg.addEventListener("pointerdown", hideTooltip);
+  canvas.addEventListener("wheel", positionTooltip);
+  window.addEventListener("resize", positionTooltip);
+  reducedMotion.addEventListener("change", updateMotion);
+  updateMotion();
+  return () => {
+    disposed = true;
+    hideTooltip();
+    cancelAnimationFrame(animationFrame);
+    controller.abort();
+    canvas.removeEventListener("wheel", positionTooltip);
+    window.removeEventListener("resize", positionTooltip);
+    reducedMotion.removeEventListener("change", updateMotion);
+    tooltip.remove();
+  };
+}
+
 async function renderGraph() {
+  const version = ++graphRenderVersion;
+  graphCleanup();
   const canvas = $("graph-canvas");
+  const projectUrl = projectPath();
   updateGraphControlLanguage();
   canvas.innerHTML = `<div class="empty-state">${esc(t("Loading graph…"))}</div>`;
   try {
-    const graph = await api(`${projectPath()}/knowledge/graph`);
+    const graph = await api(`${projectUrl}/knowledge/graph`);
+    if (version !== graphRenderVersion) return;
     state.graph = graph;
     const nodes = graph.nodes || [];
     const edges = graph.edges || [];
@@ -876,6 +1274,8 @@ async function renderGraph() {
           {
             x: cx + Math.cos(angle) * radius * 2.3,
             y: cy + Math.sin(angle) * radius * 1.65,
+            dx: 0,
+            dy: 0,
           },
         ];
       }),
@@ -885,7 +1285,7 @@ async function renderGraph() {
         const a = points.get(edge.from_id),
           b = points.get(edge.to_id);
         return a && b
-          ? `<line class="graph-edge" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" />`
+          ? `<line class="graph-edge" data-from="${esc(edge.from_id)}" data-to="${esc(edge.to_id)}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" />`
           : "";
       })
       .join("");
@@ -894,13 +1294,14 @@ async function renderGraph() {
         const point = points.get(node.external_id);
         const label =
           node.title.length > 21 ? `${node.title.slice(0, 19)}…` : node.title;
-        return `<g class="graph-node" data-graph-note="${esc(node.external_id)}"><circle cx="${point.x}" cy="${point.y}" r="${index === 0 ? 24 : 18}"/><text x="${point.x}" y="${point.y + 36}">${esc(label)}</text></g>`;
+        return `<g class="graph-node" tabindex="0" role="button" aria-label="${esc(node.title)}" data-graph-note="${esc(node.external_id)}"><circle cx="${point.x}" cy="${point.y}" r="${index === 0 ? 24 : 18}"/><text x="${point.x}" y="${point.y + 36}">${esc(label)}</text></g>`;
       })
       .join("");
-    canvas.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Knowledge graph">${edgeSvg}${nodeSvg}</svg>`;
+    canvas.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="group" aria-label="Knowledge graph">${edgeSvg}${nodeSvg}</svg>`;
     const svg = canvas.querySelector("svg");
     updateGraphViewport(svg);
     bindGraphGestures(canvas, svg);
+    graphCleanup = animateGraph(canvas, svg, nodes, points, projectUrl);
     canvas
       .querySelectorAll("[data-graph-note]")
       .forEach((node) =>
@@ -910,6 +1311,7 @@ async function renderGraph() {
         }),
       );
   } catch (error) {
+    if (version !== graphRenderVersion) return;
     canvas.innerHTML = `<div class="empty-state">${esc(t("Graph could not be loaded: "))}${esc(error.message)}</div>`;
   }
 }
@@ -1010,6 +1412,18 @@ $("new-folder").addEventListener("click", createInNewFolder);
 $("refresh").addEventListener("click", () =>
   reloadProject().catch((error) => toast(error.message)),
 );
+$("maintenance-settings").addEventListener("click", openMaintenanceSettings);
+$("maintenance-form").addEventListener("submit", saveMaintenanceSettings);
+$("maintenance-cancel").addEventListener("click", () =>
+  $("maintenance-modal").classList.add("hidden"),
+);
+$("maintenance-close").addEventListener("click", () =>
+  $("maintenance-modal").classList.add("hidden"),
+);
+$("maintenance-modal").addEventListener("click", (event) => {
+  if (event.target === $("maintenance-modal"))
+    $("maintenance-modal").classList.add("hidden");
+});
 $("open-sidebar").addEventListener("click", () =>
   $("sidebar").classList.add("open"),
 );
@@ -1137,6 +1551,7 @@ document.addEventListener("keydown", (event) => {
   }
   if (event.key === "Escape") {
     $("modal").classList.add("hidden");
+    $("maintenance-modal").classList.add("hidden");
     $("note-menu").classList.add("hidden");
   }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
@@ -1144,7 +1559,7 @@ document.addEventListener("keydown", (event) => {
     saveNote();
   }
 });
-boot();
+boot().finally(startLiveUpdates);
 
 document.addEventListener("bm-language-change", () => {
   renderTree();
