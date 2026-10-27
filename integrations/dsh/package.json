@@ -16,7 +16,7 @@
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg"
   },
-  "files": ["index.js", "cordis.patch.yml", "README.md", "locale/*.json", "icon.svg"],
+  "files": ["index.js", "ledger.js", "cordis.patch.yml", "README.md", "locale/*.json", "icon.svg"],
   "engines": { "dsh": ">=0.2.1-rc.3 <0.3.0" },
   "dependencies": { "@modelcontextprotocol/client": "2.2.0" },
   "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
