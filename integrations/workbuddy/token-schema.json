@@ -1,0 +1,17 @@
+{
+  "title": "Basic Memory 连接配置",
+  "title_en": "Basic Memory Connection",
+  "description": "输入 Basic Memory 专用访问令牌。令牌由 WorkBuddy 保存在本机；不要使用 Mem0 或其他服务的令牌。",
+  "description_en": "Enter the dedicated Basic Memory access token. WorkBuddy stores it locally. Do not use a Mem0 or other service token.",
+  "fields": [
+    {
+      "key": "BASIC_MEMORY_TOKEN",
+      "label": "Basic Memory 访问令牌",
+      "label_en": "Basic Memory access token",
+      "type": "password",
+      "required": true,
+      "placeholder": "从本机 ~/.workbuddy/secrets/basic-memory-router-access-token 读取",
+      "description": "这是 Basic Memory 专用 bearer token，与 Mem0 token 不同。不要把令牌粘贴到聊天或普通配置文件中。"
+    }
+  ]
+}

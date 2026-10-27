@@ -1,0 +1,23 @@
+{
+  "name": "Basic Memory",
+  "name_zh": "Basic Memory 记忆库",
+  "name_en": "Basic Memory",
+  "description": "Recall shared project knowledge and safely capture durable WorkBuddy decisions with Basic Memory.",
+  "description_zh": "检索共享项目记忆，并安全保存 WorkBuddy 中确认的长期事实与决策。",
+  "description_en": "Recall shared project knowledge and safely capture durable WorkBuddy decisions with Basic Memory.",
+  "source": "basic-memory-self-hosted",
+  "type": "mcp",
+  "version": "1.1.0",
+  "minWorkbuddyVersion": "4.24.0",
+  "auth_mode": "token",
+  "examples_zh": [
+    "在 main 项目里搜索之前关于 WorkBuddy 适配的记录",
+    "把这次确认的 WorkBuddy 决策保存到 main 项目的 workbuddy/decisions/",
+    "检查这轮有没有值得跨会话保存的事实，并先查重"
+  ],
+  "examples_en": [
+    "Search the main project for the previous WorkBuddy integration notes",
+    "Save this confirmed WorkBuddy decision in the main project's workbuddy/decisions/",
+    "Review this turn for durable facts and deduplicate before saving"
+  ]
+}

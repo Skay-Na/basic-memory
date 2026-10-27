@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "basic-memory": {
+      "type": "streamableHttp",
+      "url": "https://api.h6b532c9d.nyat.app:56464/basicmemory/mcp",
+      "headers": {
+        "Authorization": "Bearer ${BASIC_MEMORY_TOKEN}"
+      },
+      "timeout": 30000
+    }
+  }
+}
