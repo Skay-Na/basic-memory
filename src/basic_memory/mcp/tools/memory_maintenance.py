@@ -17,7 +17,10 @@ from basic_memory.mcp.server import mcp
         "Check whether project memory maintenance is due and get a bounded list of changed "
         "notes, or acknowledge a completed batch. This tool only tracks progress; it does "
         "not call a model or modify notes. Run maintenance after answering the current user "
-        "request, in a later turn."
+        "request, in a later turn. Review title quality along with note content: correct "
+        "generic, opaque, or misleading titles using evidence in the note, while preserving "
+        "the file path and permalink. On complete, include reviewed_note_ids only for notes "
+        "actually reviewed and organized."
     ),
     tags={"notes", "maintenance"},
     annotations={
@@ -37,6 +40,15 @@ async def memory_maintenance(
             description="For complete: the through_position returned for the finished batch.",
         ),
     ] = None,
+    reviewed_note_ids: Annotated[
+        list[str] | None,
+        Field(
+            description=(
+                "For complete: external IDs of notes in this batch that were actually "
+                "reviewed and organized."
+            ),
+        ),
+    ] = None,
     batch_size: Annotated[int, Field(ge=1, le=100)] = 20,
     context: Context | None = None,
 ) -> dict[str, object]:
@@ -54,5 +66,6 @@ async def memory_maintenance(
         completed = await client.complete_memory_maintenance(
             active_project.external_id,
             through_position,
+            reviewed_note_ids,
         )
         return completed.model_dump(mode="json")

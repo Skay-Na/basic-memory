@@ -19,6 +19,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request, Response, Path, status
 from loguru import logger
+from sqlalchemy import func, select
 
 import logfire
 from basic_memory import db
@@ -62,6 +63,10 @@ from basic_memory.deps import (
     RelationResolutionSchedulerDep,
     SessionDep,
     SessionMakerDep,
+)
+from basic_memory.models.project import (
+    AcceptedProjectNoteChange,
+    MemoryMaintenanceReview,
 )
 from basic_memory.read_cache import ReadCacheOperation, invalidate_cache
 from basic_memory.read_cache.policy import READ_CACHE_TTL_SECONDS
@@ -111,6 +116,7 @@ from basic_memory.schemas.v2 import (
 )
 from basic_memory.schemas.response import DirectoryMoveResult
 from basic_memory.utils import (
+    ensure_timezone_aware,
     generate_permalink,
     nfc_path,
     normalize_project_reference,
@@ -206,12 +212,35 @@ async def get_graph(
 
         # Fetch all entities for this project
         entities = await entity_repository.find_all(session, use_load_options=False)
+        latest_change_rows = await session.execute(
+            select(
+                AcceptedProjectNoteChange.note_external_id,
+                func.max(AcceptedProjectNoteChange.partition_position),
+            )
+            .where(AcceptedProjectNoteChange.project_id == project_id)
+            .group_by(AcceptedProjectNoteChange.note_external_id)
+        )
+        latest_change_by_note_id = dict(latest_change_rows.all())
+        review_rows = await session.scalars(
+            select(MemoryMaintenanceReview).where(
+                MemoryMaintenanceReview.project_id == project_id
+            )
+        )
+        review_by_note_id = {review.note_external_id: review for review in review_rows}
         nodes = [
             GraphNode(
                 external_id=entity.external_id,
                 title=entity.title,
                 note_type=entity.note_type,
                 file_path=entity.file_path,
+                last_maintained_at=(
+                    review.reviewed_at
+                    if (review := review_by_note_id.get(entity.external_id))
+                    and review.reviewed_through_position
+                    >= latest_change_by_note_id.get(entity.external_id, 0)
+                    and ensure_timezone_aware(entity.updated_at) <= review.reviewed_at
+                    else None
+                ),
             )
             for entity in entities
         ]

@@ -63,8 +63,11 @@ uv run --quiet --no-project --script plugins/codex/hooks/memory_review.py show <
 Codex 插件可选启用 `basicMemory.memoryMaintenance: true`。UserPromptSubmit 会提示 agent
 先处理当前请求，再检查 MCP 工具 `bm_memory_maintenance`。后端依据已接受笔记变更日志的项目
 水位，在 14 天或 20 个不同笔记变更达到任一阈值时报告 `due=true`；每批最多返回 20 个笔记。
-agent 自行审阅和写回，完成后确认对应 `through_position`。该流程不在 Stop 中阻塞当前回答，
-也不启动后台模型；只有后续 Codex 回合运行且 MCP 可用时才会处理。默认关闭。删除、自动覆盖
+当前 agent 在本轮最终回复前自行审阅和写回，不向对话发送整理计划或请求常规确认。整理批次有上限，
+因此会增加触发该批次的回合耗时；没有活跃 Codex 回合时不会在后台运行。除内容、来源、范围、关系和标签外，还逐篇核对标题是否具体、准确、可检索，
+是否只是 UUID、时间戳、路径或泛化收件箱名称；不合格时依据正文修正 frontmatter 标题和首个 H1，
+保留文件路径、permalink 与关系，已有合格标题则不改。完成后确认对应 `through_position`。该流程不在 Stop 中阻塞当前回答，
+也不启动独立后台模型；由当前 agent 在正常回合内完成。默认关闭。删除、自动覆盖
 和多 agent 并发领取不在当前实现范围内。
 
 ## SessionEnd 待整理收集
@@ -72,8 +75,10 @@ agent 自行审阅和写回，完成后确认对应 `through_position`。该流�
 项目可在最近的 `.codex/basic-memory.json` 中设置 `basicMemory.sessionEndInbox: true`。
 Codex 的同步 SessionEnd Hook 会从 `transcript_path` 找到最后一条用户请求，以及该请求之后
 已完成的 `assistant` `final_answer`，并将两者作为普通笔记写入配置的 `primaryProject` 下
-`codex/inbox`。笔记标记 `status: pending_review`，带会话 ID、工作目录和 transcript 文件名，
-并使用稳定会话 ID 作为标题组成部分，防止同一会话重复创建。原文中的内容只作为待整理数据，
+`codex/inbox`。笔记标记 `status: pending_review`，带会话 ID、工作目录和 transcript 文件名；标题从
+用户请求提取，若请求只是泛化跟进则改用最终回答开头，并保留完整会话 ID 作为唯一后缀。正文先写
+“会话摘要”，包含请求和处理结果，再保留原始对话。Web UI 列表会为已有旧格式收件箱笔记读取摘要，
+并显示从用户请求/最终回答提取的标题和概述。原文中的内容只作为待整理数据，
 后续 agent 仍需审阅、查重、判断来源和适用范围；Hook 不将对话直接视为已确认记忆。
 
 此功能默认关闭，应只在需要该行为的项目级配置中启用。它会保存完整的最后回答，因此该请求或

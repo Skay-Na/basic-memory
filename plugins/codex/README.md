@@ -123,12 +123,21 @@ is cached. Set `basicMemory.semanticCapture` to JSON `false` to opt out.
 The `bm_memory_maintenance` tool exposes a project change watermark and a bounded
 batch of accepted note changes. It only reports and acknowledges progress; the
 agent performs all reading, judgment, and note edits. The tool does not start a
-background agent. A future Codex turn must check the status and work through the
-batch for maintenance to happen. Defaults are 20 distinct changed notes or 14
-days, with batches capped at 20 notes.
-Set `basicMemory.memoryMaintenance` to JSON `true` to have the next user turn
-check status after the current request has been handled. This setting is false
-by default and currently requires semantic capture to be enabled as well.
+background agent. Each enabled user turn checks status and, when due, works
+through the bounded batch before replying. Each note review also checks whether its title is
+clear, descriptive, searchable, and supported by the note. Generic, opaque, or
+misleading titles should be corrected in frontmatter and the first H1 while
+preserving the file path, permalink, relations, and body facts. Good titles stay
+unchanged. Defaults are 20 distinct changed notes or 14 days, with batches capped
+at 20 notes.
+Set `basicMemory.memoryMaintenance` to JSON `true` to have each user turn check
+status after the current request has been handled. When a bounded batch is due,
+the current agent silently curates it before its final reply; it does not send a
+separate plan or ask for routine confirmation. This work can add latency to that
+turn, bounded by the configured batch size. The setting is false by default and
+currently requires semantic capture to be enabled as well. It still requires an
+active Codex turn and an available MCP connection; it is not a resident background
+agent.
 
 The synchronous `SessionEnd` hook can save the last user request and its complete
 final answer as a `pending_review` note under `codex/inbox`. It only runs when
@@ -141,6 +150,9 @@ also included. If the MCP endpoint is unavailable or the write fails, the hook
 logs a content-free diagnostic and allows session closure; it does not guarantee
 delivery or retry without a later Codex run. SessionEnd may be delayed after
 inactivity and does not run merely because the user switches conversations.
+The note title is derived from the request (or the final answer when the request
+is only a generic follow-up), with the session ID retained as a uniqueness suffix.
+The body includes a short request/result overview before the original exchange.
 
 See [语义捕捉说明](../../docs/codex-semantic-capture-zh.md) for receipt states,
 configuration, recovery, and migration from the old keyword-based Stop handler.

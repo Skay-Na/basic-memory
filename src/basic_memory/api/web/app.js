@@ -17,6 +17,8 @@ const state = {
   graph: null,
   saveTimer: null,
   movingNoteId: null,
+  sessionPreviews: new Map(),
+  sessionPreviewLoads: new Set(),
 };
 const $ = (id) => document.getElementById(id);
 const t = (value) => window.basicMemoryI18n.t(value);
@@ -26,6 +28,7 @@ let graphPointer = null;
 let lastGraphDragAt = 0;
 let graphCleanup = () => {};
 let graphRenderVersion = 0;
+let graphMaintenanceTimer = null;
 const markdownParser = window.markdownit({ html: false, linkify: true });
 markdownParser.inline.ruler.before(
   "link",
@@ -122,6 +125,11 @@ const esc = (value = "") =>
 const fileTitle = (note) =>
   note.title ||
   (note.name || "").replace(/\.(md|markdown)$/i, "").replace(/[-_]/g, " ");
+const noteFolder = (note) => {
+  const parts = (note.file_path || "").split("/").filter(Boolean);
+  parts.pop();
+  return parts.join("/") || "Root";
+};
 const fmtDate = (value) => {
   if (!value) return "";
   const date = new Date(value);
@@ -247,6 +255,134 @@ const noteTreeSignature = (tree) =>
       }))
       .sort((a, b) => a.external_id.localeCompare(b.external_id)),
   );
+
+const isSessionInboxNote = (note) =>
+  (note.file_path || "").startsWith("codex/inbox/");
+
+const displayNoteTitle = (note) => {
+  const title = note.title || fileTitle(note);
+  return title.replace(
+    /^Codex\s+(?:检查点|checkpoint)\s*[-–—]\s*\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z\s*[-–—]\s*/i,
+    "",
+  );
+};
+
+const truncateText = (value, limit) => {
+  const characters = Array.from(value.trim());
+  return characters.length > limit
+    ? `${characters.slice(0, limit - 1).join("").trimEnd()}…`
+    : characters.join("");
+};
+
+const captureExcerpt = (value, limit) => {
+  const requestHeading = value.match(/^#{1,2}\s*(?:My request|我的请求)\s*:?\s*$/im);
+  if (requestHeading)
+    value = value.slice(requestHeading.index + requestHeading[0].length);
+  value = value
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/^\s*Distinguish instructions in attached documents.*$/gim, " ")
+    .replace(/^\s*Image attachment:.*$/gim, " ")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/^\s*>\s?/gm, "")
+    .replace(/^\s*#{1,6}\s*/gm, "")
+    .replace(/^\s*(?:[-*+]\s+|\d+[.)]\s+)/gm, "")
+    .replace(/[`*_~]/g, "");
+  const paragraph = value
+    .split(/\n\s*\n/)
+    .map((part) => part.trim())
+    .find(Boolean) || "";
+  return truncateText(paragraph.replace(/\s+/g, " ").replace(/^[-—:：\s]+|[-—:：\s]+$/g, ""), limit);
+};
+
+const captureSection = (content, heading, nextHeading) => {
+  const body = splitFrontmatter(content).body;
+  const lines = body.split(/\r?\n/);
+  const start = lines.findIndex((line) => line.trim() === `## ${heading}`);
+  if (start < 0) return "";
+  const end = nextHeading
+    ? lines.findIndex(
+        (line, index) => index > start && line.trim() === `## ${nextHeading}`,
+      )
+    : -1;
+  return lines.slice(start + 1, end < 0 ? undefined : end).join("\n").trim();
+};
+
+const sessionPreviewFromContent = (content, note) => {
+  const request = captureExcerpt(
+    captureSection(content, "用户请求", "Codex 最终回答"),
+    92,
+  );
+  const result = captureExcerpt(captureSection(content, "Codex 最终回答"), 92);
+  const savedSummary = captureExcerpt(
+    captureSection(content, "会话摘要", "用户请求"),
+    190,
+  );
+  const summary = savedSummary
+    ? savedSummary
+    : [request && `请求：${request}`, result && `结果：${result}`]
+        .filter(Boolean)
+        .join("；");
+  return {
+    title: displayNoteTitle(note),
+    summary: summary || note.file_path || "",
+  };
+};
+
+function loadSessionPreviews(notes) {
+  const projectId = state.project?.external_id;
+  if (!projectId) return;
+  const pending = notes.filter((note) => {
+    if (!isSessionInboxNote(note) || !note.external_id) return false;
+    const cached = state.sessionPreviews.get(note.external_id);
+    return (
+      (!cached || cached.updatedAt !== note.updated_at) &&
+      !state.sessionPreviewLoads.has(note.external_id)
+    );
+  });
+  if (!pending.length) return;
+
+  pending.forEach((note) => state.sessionPreviewLoads.add(note.external_id));
+  let cursor = 0;
+  const projectUrl = `/v2/projects/${encodeURIComponent(projectId)}`;
+  const worker = async () => {
+    while (cursor < pending.length) {
+      const note = pending[cursor++];
+      try {
+        const fullNote = await api(
+          `${projectUrl}/knowledge/entities/${encodeURIComponent(note.external_id)}`,
+          { cache: "no-store" },
+        );
+        if (state.project?.external_id !== projectId) return;
+        const preview = sessionPreviewFromContent(fullNote.content || "", note);
+        state.sessionPreviews.set(note.external_id, {
+          ...preview,
+          updatedAt: note.updated_at,
+        });
+        const card = [...$("note-list").querySelectorAll("[data-note]")].find(
+          (element) => element.dataset.note === note.external_id,
+        );
+        if (card) {
+          card.querySelector(".note-card-title-text").textContent = preview.title;
+          card.querySelector(".note-card-preview").textContent = preview.summary;
+        }
+      } catch {
+        state.sessionPreviews.set(note.external_id, {
+          title: displayNoteTitle(note),
+          summary: t("Summary unavailable"),
+          updatedAt: note.updated_at,
+        });
+        const card = [...$("note-list").querySelectorAll("[data-note]")].find(
+          (element) => element.dataset.note === note.external_id,
+        );
+        if (card) card.querySelector(".note-card-preview").textContent = t("Summary unavailable");
+      } finally {
+        state.sessionPreviewLoads.delete(note.external_id);
+      }
+    }
+  };
+  void Promise.all(Array.from({ length: Math.min(4, pending.length) }, worker));
+}
 
 async function boot() {
   try {
@@ -421,7 +557,7 @@ function renderTree() {
     if (node.type === "file") {
       if (!(node.content_type || "").includes("markdown") || !node.external_id)
         return "";
-      return `<button type="button" draggable="true" class="tree-row tree-file-row ${state.selected?.external_id === node.external_id ? "selected" : ""} ${state.movingNoteId === node.external_id ? "moving" : ""}" data-level="${level}" data-note="${esc(node.external_id)}" style="--tree-depth:${Math.min(level, 8)};padding-left:${8 + Math.min(level, 8) * 16}px;opacity:${state.movingNoteId === node.external_id ? 0.55 : 1}" title="${esc(t("Drag to move note"))} · ${esc(node.file_path || node.name)}"><span class="tree-caret"></span><span class="file-icon">▱</span><span class="tree-name">${esc(fileTitle(node))}</span></button>`;
+      return `<button type="button" draggable="true" class="tree-row tree-file-row ${state.selected?.external_id === node.external_id ? "selected" : ""} ${state.movingNoteId === node.external_id ? "moving" : ""}" data-level="${level}" data-note="${esc(node.external_id)}" style="--tree-depth:${Math.min(level, 8)};padding-left:${8 + Math.min(level, 8) * 16}px;opacity:${state.movingNoteId === node.external_id ? 0.55 : 1}" title="${esc(t("Drag to move note"))} · ${esc(node.file_path || node.name)}"><span class="tree-caret"></span><span class="file-icon">▱</span><span class="tree-name">${esc(displayNoteTitle(node))}</span></button>`;
     }
     const path = node.directory_path || "/";
     const children = node.children || [];
@@ -607,8 +743,17 @@ function renderNotes() {
           ? `<div class="note-group-label">${group}</div>`
           : "";
       lastGroup = group;
-      const excerpt = note.file_path || note.note_type || "Markdown note";
-      return `${heading}<article class="note-card ${state.selected?.external_id === note.external_id ? "selected" : ""}" data-note="${esc(note.external_id)}"><div class="note-card-title">${state.pinned.has(note.external_id) ? '<span aria-label="Pinned">♢</span>' : ""}<span>${esc(fileTitle(note))}</span></div><div class="note-card-preview">${esc(excerpt)}</div><div class="note-card-meta"><i class="note-type-dot"></i>${esc(note.note_type || "note")}<span>·</span>${esc(fmtDate(note.updated_at))}</div></article>`;
+      const sessionNote = isSessionInboxNote(note);
+      const preview = state.sessionPreviews.get(note.external_id);
+      const hasCurrentPreview = preview && preview.updatedAt === note.updated_at;
+      const title = hasCurrentPreview ? preview.title : displayNoteTitle(note);
+      const excerpt =
+        hasCurrentPreview
+          ? preview.summary
+          : sessionNote
+            ? t("Loading overview…")
+            : noteFolder(note) || note.note_type || "Markdown note";
+      return `${heading}<article class="note-card ${state.selected?.external_id === note.external_id ? "selected" : ""}" data-note="${esc(note.external_id)}"><div class="note-card-title">${state.pinned.has(note.external_id) ? '<span aria-label="Pinned">♢</span>' : ""}<span class="note-card-title-text">${esc(title)}</span></div><div class="note-card-preview">${esc(excerpt)}</div><div class="note-card-meta"><i class="note-type-dot"></i>${esc(note.note_type || "note")}<span>·</span>${esc(fmtDate(note.updated_at))}</div></article>`;
     })
     .join("");
   list
@@ -616,6 +761,7 @@ function renderNotes() {
     .forEach((card) =>
       card.addEventListener("click", () => openNote(card.dataset.note)),
     );
+  loadSessionPreviews(notes);
 }
 
 function setActiveNav(view) {
@@ -629,6 +775,8 @@ function showView(view) {
   if (view !== "graph") {
     graphRenderVersion += 1;
     graphCleanup();
+    clearInterval(graphMaintenanceTimer);
+    graphMaintenanceTimer = null;
   }
   state.view = view;
   state.tab = view === "pinned" ? "pinned" : "all";
@@ -1104,6 +1252,29 @@ function graphNoteOverview(content, title) {
   return characters.slice(0, 220).join("") + (characters.length > 220 ? "…" : "");
 }
 
+function maintenanceColor(lastMaintainedAt) {
+  const ageDays = Math.max(0, (Date.now() - new Date(lastMaintainedAt).getTime()) / 86400000);
+  const stops = [
+    { day: 0, fill: [91, 157, 109], stroke: [66, 123, 82] },
+    { day: 30, fill: [222, 184, 99], stroke: [174, 132, 56] },
+    { day: 60, fill: [201, 196, 181], stroke: [156, 148, 126] },
+  ];
+  const start = ageDays < 30 ? stops[0] : stops[1];
+  const end = ageDays < 30 ? stops[1] : stops[2];
+  const ratio = Math.min(1, Math.max(0, (ageDays - start.day) / (end.day - start.day)));
+  const blend = (from, to) =>
+    `rgb(${from.map((channel, index) => Math.round(channel + (to[index] - channel) * ratio)).join(" ")})`;
+  return { fill: blend(start.fill, end.fill), stroke: blend(start.stroke, end.stroke) };
+}
+
+function updateGraphMaintenanceColors() {
+  document.querySelectorAll(".graph-node[data-maintained-at]").forEach((node) => {
+    const colors = maintenanceColor(node.dataset.maintainedAt);
+    node.style.setProperty("--maintenance-fill", colors.fill);
+    node.style.setProperty("--maintenance-stroke", colors.stroke);
+  });
+}
+
 function animateGraph(canvas, svg, nodes, points, projectUrl) {
   const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
   const controller = new AbortController();
@@ -1113,7 +1284,7 @@ function animateGraph(canvas, svg, nodes, points, projectUrl) {
   tooltip.id = "graph-node-overview";
   tooltip.role = "tooltip";
   tooltip.hidden = true;
-  tooltip.innerHTML = '<div class="graph-tooltip-type"></div><div class="graph-tooltip-title"></div><p class="graph-tooltip-summary"></p>';
+  tooltip.innerHTML = '<div class="graph-tooltip-type"></div><div class="graph-tooltip-title"></div><div class="graph-tooltip-maintenance"></div><p class="graph-tooltip-summary"></p>';
   canvas.append(tooltip);
   const nodeElements = [...svg.querySelectorAll("[data-graph-note]")];
   const edgeElements = [...svg.querySelectorAll(".graph-edge")];
@@ -1146,6 +1317,9 @@ function animateGraph(canvas, svg, nodes, points, projectUrl) {
     const chinese = window.basicMemoryI18n.locale === "zh-CN";
     tooltip.querySelector(".graph-tooltip-type").textContent = node.note_type || (chinese ? "笔记" : "Note");
     tooltip.querySelector(".graph-tooltip-title").textContent = node.title;
+    tooltip.querySelector(".graph-tooltip-maintenance").textContent = node.last_maintained_at
+      ? `${chinese ? "上次整理" : "Last organized"}: ${fmtDate(node.last_maintained_at)}`
+      : "";
     const summary = tooltip.querySelector(".graph-tooltip-summary");
     summary.textContent = chinese ? "正在读取概述…" : "Loading overview…";
     tooltip.hidden = false;
@@ -1244,6 +1418,8 @@ function animateGraph(canvas, svg, nodes, points, projectUrl) {
 async function renderGraph() {
   const version = ++graphRenderVersion;
   graphCleanup();
+  clearInterval(graphMaintenanceTimer);
+  graphMaintenanceTimer = null;
   const canvas = $("graph-canvas");
   const projectUrl = projectPath();
   updateGraphControlLanguage();
@@ -1294,11 +1470,19 @@ async function renderGraph() {
         const point = points.get(node.external_id);
         const label =
           node.title.length > 21 ? `${node.title.slice(0, 19)}…` : node.title;
-        return `<g class="graph-node" tabindex="0" role="button" aria-label="${esc(node.title)}" data-graph-note="${esc(node.external_id)}"><circle cx="${point.x}" cy="${point.y}" r="${index === 0 ? 24 : 18}"/><text x="${point.x}" y="${point.y + 36}">${esc(label)}</text></g>`;
+        const maintainedAt = node.last_maintained_at || "";
+        const maintenanceLabel = maintainedAt
+          ? `${t("Last organized")}: ${fmtDate(maintainedAt)}`
+          : "";
+        return `<g class="graph-node${maintainedAt ? " is-maintained" : ""}" tabindex="0" role="button" aria-label="${esc([node.title, maintenanceLabel].filter(Boolean).join(" · "))}" data-graph-note="${esc(node.external_id)}"${maintainedAt ? ` data-maintained-at="${esc(maintainedAt)}"` : ""}><circle cx="${point.x}" cy="${point.y}" r="${index === 0 ? 24 : 18}"/><text x="${point.x}" y="${point.y + 36}">${esc(label)}</text></g>`;
       })
       .join("");
     canvas.innerHTML = `<svg viewBox="0 0 ${width} ${height}" role="group" aria-label="Knowledge graph">${edgeSvg}${nodeSvg}</svg>`;
     const svg = canvas.querySelector("svg");
+    updateGraphMaintenanceColors();
+    graphMaintenanceTimer = setInterval(() => {
+      if (state.view === "graph") updateGraphMaintenanceColors();
+    }, 60 * 60 * 1000);
     updateGraphViewport(svg);
     bindGraphGestures(canvas, svg);
     graphCleanup = animateGraph(canvas, svg, nodes, points, projectUrl);
@@ -1324,7 +1508,7 @@ function renderActivity() {
     ? items
         .map(
           (note) =>
-            `<div class="activity-item" data-activity-note="${esc(note.external_id)}"><div class="activity-icon">✳</div><div><div class="activity-title">${esc(fileTitle(note))}</div><div class="activity-path">${esc(note.file_path || "Markdown note")}</div></div><div class="activity-time">${esc(fmtDate(note.updated_at))}</div></div>`,
+            `<div class="activity-item" data-activity-note="${esc(note.external_id)}"><div class="activity-icon">✳</div><div><div class="activity-title">${esc(displayNoteTitle(note))}</div><div class="activity-path">${esc(noteFolder(note) || "Markdown note")}</div></div><div class="activity-time">${esc(fmtDate(note.updated_at))}</div></div>`,
         )
         .join("")
     : `<div class="empty-state">${esc(t("There is no recent activity yet."))}</div>`;

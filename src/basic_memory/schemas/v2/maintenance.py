@@ -46,6 +46,7 @@ class MemoryMaintenanceCompletion(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     through_position: int = Field(ge=0)
+    reviewed_note_ids: list[str] = Field(default_factory=list, max_length=100)
 
 
 class MemoryMaintenanceCompletionResponse(BaseModel):
@@ -54,3 +55,4 @@ class MemoryMaintenanceCompletionResponse(BaseModel):
     project_id: str
     through_position: int = Field(ge=0)
     completed_at: datetime
+    reviewed_note_count: int = Field(default=0, ge=0)

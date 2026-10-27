@@ -1,0 +1,10 @@
+- insert:
+    - id: basic-memory
+      name: '@basicmemory/dsh-basic-memory'
+      config:
+        endpoint: https://your-basic-memory-host.example/basicmemory/mcp
+        tokenFile: ~/.config/basic-memory/token
+        project: main
+        captureFolder: dsh/inbox
+        autoRecall: true
+        autoCapture: true

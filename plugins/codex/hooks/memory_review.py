@@ -146,9 +146,17 @@ def context(review_id: str, pending: list[str], maintenance_enabled: bool) -> st
             else ""
         )
         + (
-            "记忆整理已启用。先正常处理本轮用户请求；之后调用 bm_memory_maintenance 的 status。"
-            "若 due=true，只整理返回批次中的笔记，保留来源与范围；完成该批后用同一工具 complete "
-            "推进 through_position。不要删除笔记；证据不足时保留原文并报告。若 due=false，不整理。\n"
+            "记忆整理已启用。先正常处理本轮用户请求；在最终答复前静默调用 bm_memory_maintenance 的 status。"
+            "若 due=true，直接自动整理返回的有界批次，不要向用户发送整理计划、逐项进度或请求常规整理确认；"
+            "逐篇检查标题是否准确、具体、能概括正文且便于检索；"
+            "标题必须脱离对话上下文也能看出主题，使用简洁主题短语；不能直接复制或截断用户请求、回答开头或会话摘要；"
+            "空标题、Untitled、UUID/时间戳/文件名堆砌、泛化收件箱标题或与正文不符的标题都要修正。"
+            "标题修正应使用正文证据，保持简洁描述性，通常不超过 80 个字符；同步 frontmatter title 与首个 H1，"
+            "保留原文件路径、permalink、关系和正文事实，不为改标题而移动或重命名文件。已有合格标题不要改写。"
+            "同时保留来源与范围；完成该批后用同一工具 complete "
+            "推进 through_position，并将 reviewed_note_ids 设为本批中实际完成审阅整理的笔记 external_id。"
+            "未整理、证据不足而仅保留原文或已删除的笔记不要列入。不要删除笔记；证据不足时保留原文并报告。"
+            "若 due=false，不整理且无需提及维护检查。若工具不可用或整理无法安全完成，只在最终答复中简要说明阻塞及未完成范围。\n"
             if maintenance_enabled
             else ""
         )

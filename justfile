@@ -611,14 +611,14 @@ check: lint format typecheck
 # Run all code quality checks and all test suites, including semantic benchmarks
 check-all: lint format typecheck test test-semantic
 
-# Validate every consolidated agent package (Claude Code, Codex, skills, Hermes, OpenClaw, Tau, Pi)
-package-check: package-check-claude-code package-check-codex package-check-skills package-check-hermes package-check-openclaw package-check-tau package-check-pi
+# Validate every consolidated agent package (Claude Code, Codex, skills, Hermes, OpenClaw, Tau, Pi, OpenCode)
+package-check: package-check-claude-code package-check-codex package-check-skills package-check-hermes package-check-openclaw package-check-tau package-check-pi package-check-opencode
 
 # Alias for plugin/package validation during consolidation work
 plugins-check: package-check
 
 # Validate the host-native agent harnesses
-agent-harness-check: package-check-claude-code package-check-hermes package-check-openclaw package-check-tau package-check-pi
+agent-harness-check: package-check-claude-code package-check-hermes package-check-openclaw package-check-tau package-check-pi package-check-opencode
 
 # Claude Code plugin: manifests, bundled skills, bundled agent, and strict plugin validation
 package-check-claude-code:
@@ -648,6 +648,12 @@ package-check-tau:
 # Pi package: install deps, copy skills, typecheck, test, and npm pack dry-run
 package-check-pi:
     just --justfile integrations/pi/justfile --working-directory integrations/pi check
+
+# OpenCode plugin: install dependencies, typecheck, and validate the npm package contents
+package-check-opencode:
+    cd integrations/opencode && npm ci
+    cd integrations/opencode && ./node_modules/.bin/tsc --noEmit
+    cd integrations/opencode && npm pack --dry-run
 
 # Generate Alembic migration with descriptive message.
 # The revision ID is the next schema version ("0040", "0041", ...), assigned by alembic/env.py.

@@ -1,0 +1,23 @@
+{
+  "name": "@basicmemory/dsh-basic-memory",
+  "version": "0.24.1",
+  "private": true,
+  "type": "module",
+  "description": "Automatic Basic Memory recall and reviewed session capture for DeepSeek Harness",
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/basicmachines-co/basic-memory.git",
+    "directory": "integrations/dsh"
+  },
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": ["index.js", "cordis.patch.yml", "README.md", "locale/*.json", "icon.svg"],
+  "engines": { "dsh": ">=0.2.1-rc.3 <0.3.0" },
+  "dependencies": { "@modelcontextprotocol/client": "2.2.0" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+}

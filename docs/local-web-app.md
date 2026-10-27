@@ -34,6 +34,7 @@ by the authenticated router gateway; the page links to that gateway's account se
 - Markdown edits use the v2 accepted-note API, save automatically, preserve frontmatter in rich mode, and save pending changes before navigating to another note.
 - Create and delete notes, pin notes in this browser, and browse recent note updates.
 - Knowledge graph view with connected notes, zoom buttons, wheel zoom, press-and-drag panning, and clickable nodes.
+- Newly completed maintenance batches mark notes actually reviewed; their graph nodes shift from green through amber toward muted gray over 60 days. Notes outside a completed batch keep the default color, and old maintenance passes are not backfilled because they did not record note-level review data.
 - Graph nodes drift gently with their connecting lines. Hover or keyboard focus steadies a node and
   shows its title and a short excerpt from the note (loaded on demand, without editing it).
   The graph respects the system's reduced-motion preference.

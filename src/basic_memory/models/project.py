@@ -125,6 +125,12 @@ class Project(Base):
         order_by="AcceptedProjectNoteChange.partition_position",
         passive_deletes=True,
     )
+    memory_maintenance_reviews = relationship(
+        "MemoryMaintenanceReview",
+        back_populates="project",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
     @override
     def __repr__(self) -> str:  # pragma: no cover
@@ -204,5 +210,35 @@ class AcceptedProjectNoteChange(Base):
         # Normalize project-journal timestamps at the model boundary so the
         # projector receives the same aware instants on every supported backend.
         if name in {"accepted_at", "materialized_at"} and isinstance(value, datetime):
+            return ensure_timezone_aware(value)
+        return value
+
+
+class MemoryMaintenanceReview(Base):
+    """Last completed maintenance pass for one note in a project."""
+
+    __tablename__ = "memory_maintenance_review"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "note_external_id",
+            name="uq_memory_maintenance_review_project_note",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("project.id", ondelete="CASCADE"), nullable=False
+    )
+    note_external_id: Mapped[str] = mapped_column(String, nullable=False)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reviewed_through_position: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    project = relationship("Project", back_populates="memory_maintenance_reviews")
+
+    @override
+    def __getattribute__(self, name: str):
+        value = super().__getattribute__(name)
+        if name == "reviewed_at" and isinstance(value, datetime):
             return ensure_timezone_aware(value)
         return value

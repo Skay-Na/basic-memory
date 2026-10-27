@@ -212,6 +212,11 @@ source = "uv-dynamic-versioning"
 "integrations/pi/README.md" = "basic_memory/data/pi/package/README.md"
 "integrations/pi/SKILLS.md" = "basic_memory/data/pi/package/SKILLS.md"
 "integrations/pi/LICENSE" = "basic_memory/data/pi/package/LICENSE"
+"integrations/opencode/src" = "basic_memory/data/opencode/package/src"
+"integrations/opencode/package.json" = "basic_memory/data/opencode/package/package.json"
+"integrations/opencode/package-lock.json" = "basic_memory/data/opencode/package/package-lock.json"
+"integrations/opencode/README.md" = "basic_memory/data/opencode/package/README.md"
+"integrations/opencode/LICENSE" = "basic_memory/data/opencode/package/LICENSE"
 
 [tool.uv-dynamic-versioning]
 vcs = "git"

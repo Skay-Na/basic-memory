@@ -1,5 +1,6 @@
 """Graph visualization schemas for the knowledge graph endpoint."""
 
+from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -12,6 +13,9 @@ class GraphNode(BaseModel):
     title: str = Field(..., description="Entity title")
     note_type: Optional[str] = Field(None, description="Note type (e.g., note, spec, task)")
     file_path: str = Field(..., description="Relative file path")
+    last_maintained_at: datetime | None = Field(
+        None, description="When this note was last included in a completed maintenance pass"
+    )
 
 
 class GraphEdge(BaseModel):

@@ -36,7 +36,7 @@ from basic_memory.index.local_project import ProjectIndexRouteRequest
 from basic_memory.read_cache import invalidate_cache
 from basic_memory.schemas import ProjectIndexStatusResponse
 from basic_memory.models import Project
-from basic_memory.models.project import AcceptedProjectNoteChange
+from basic_memory.models.project import AcceptedProjectNoteChange, MemoryMaintenanceReview
 from basic_memory.schemas.doctor import ProjectDoctorReport
 from basic_memory.services.project_doctor import diagnose_project
 from basic_memory.repository.project_repository import ProjectRepository
@@ -227,6 +227,45 @@ async def complete_memory_maintenance(
     if payload.through_position < project_row.memory_maintenance_position:
         raise HTTPException(status_code=409, detail="Checkpoint cannot move backwards")
     completed_at = datetime.now(UTC)
+    requested_review_ids = set(payload.reviewed_note_ids)
+    eligible_review_ids = set(
+        (
+            await session.scalars(
+                select(AcceptedProjectNoteChange.note_external_id)
+                .where(
+                    AcceptedProjectNoteChange.project_id == project,
+                    AcceptedProjectNoteChange.partition_position
+                    > project_row.memory_maintenance_position,
+                    AcceptedProjectNoteChange.partition_position <= payload.through_position,
+                )
+                .distinct()
+            )
+        ).all()
+    )
+    if not requested_review_ids.issubset(eligible_review_ids):
+        raise HTTPException(
+            status_code=422,
+            detail="Reviewed notes must belong to the completed maintenance batch",
+        )
+    for note_external_id in requested_review_ids:
+        review = await session.scalar(
+            select(MemoryMaintenanceReview).where(
+                MemoryMaintenanceReview.project_id == project,
+                MemoryMaintenanceReview.note_external_id == note_external_id,
+            )
+        )
+        if review is None:
+            session.add(
+                MemoryMaintenanceReview(
+                    project_id=project,
+                    note_external_id=note_external_id,
+                    reviewed_at=completed_at,
+                    reviewed_through_position=payload.through_position,
+                )
+            )
+        else:
+            review.reviewed_at = completed_at
+            review.reviewed_through_position = payload.through_position
     project_row.memory_maintenance_position = payload.through_position
     project_row.memory_maintenance_completed_at = completed_at
     await session.commit()
@@ -234,6 +273,7 @@ async def complete_memory_maintenance(
         project_id=project_row.external_id,
         through_position=payload.through_position,
         completed_at=completed_at,
+        reviewed_note_count=len(requested_review_ids),
     )
 
 

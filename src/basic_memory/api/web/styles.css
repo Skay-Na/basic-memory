@@ -460,12 +460,12 @@ textarea:focus-visible,
   white-space: nowrap;
 }
 .note-card-preview {
-  font-size: 10px;
-  line-height: 1.5;
-  color: #87877e;
+  font-size: 11px;
+  line-height: 1.55;
+  color: #74766e;
   margin-top: 4px;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
@@ -993,6 +993,10 @@ textarea:focus-visible,
   stroke-width: 1.4;
   transition: fill 220ms ease, stroke 220ms ease, filter 220ms ease;
 }
+.graph-node.is-maintained circle {
+  fill: var(--maintenance-fill, #5b9d6d);
+  stroke: var(--maintenance-stroke, #427b52);
+}
 .graph-node text {
   font:
     11px "DM Sans",
@@ -1038,6 +1042,11 @@ textarea:focus-visible,
   font-weight: 600;
   line-height: 1.5;
 }
+.graph-tooltip-maintenance {
+  margin-top: 5px;
+  color: #9b7740;
+  font-size: 10px;
+}
 .graph-tooltip-summary {
   margin: 8px 0 0;
   color: #70776a;
@@ -1073,6 +1082,13 @@ textarea:focus-visible,
 .graph-legend span:nth-child(2) i {
   background: #eadfce;
   border-color: #d7c4a5;
+}
+.graph-legend .maintenance-legend i {
+  width: 34px;
+  height: 8px;
+  border: 0;
+  border-radius: 5px;
+  background: linear-gradient(90deg, #5b9d6d, #deb863, #c9c4b5);
 }
 .activity-intro {
   color: #8d8e85;
