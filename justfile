@@ -653,6 +653,7 @@ package-check-pi:
 package-check-opencode:
     cd integrations/opencode && npm ci
     cd integrations/opencode && ./node_modules/.bin/tsc --noEmit
+    cd integrations/opencode && ./node_modules/.bin/tsx --test tests/integration.test.ts
     cd integrations/opencode && npm pack --dry-run
 
 # Generate Alembic migration with descriptive message.
