@@ -1,6 +1,6 @@
 const $ = (id) => document.getElementById(id);
 const control = "http://127.0.0.1:18895";
-const labels = { codex: "Codex", dsh: "DSH", opencode: "OpenCode" };
+const labels = { codex: "Codex", antigravity: "Antigravity", dsh: "DSH", opencode: "OpenCode" };
 const state = { projects: [], agents: [], cwd: "", busy: false };
 const esc = (value = "") => String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 
@@ -57,7 +57,7 @@ function render() {
     const options = state.projects.map((project) => `<option value="${esc(project.name)}" ${project.name === agent.project ? "selected" : ""}>${esc(project.name)}</option>`).join("");
     const missing = state.projects.some((project) => project.name === agent.project) ? "" : `<option value="" selected disabled>当前项目 ${esc(agent.project)} 不在后端项目列表中</option>`;
     return `<article class="agent-card" data-agent="${esc(agent.agent)}"><div class="agent-card-head"><strong>${esc(labels[agent.agent])}</strong><span>配置文件已读取 · 运行时状态未确认</span></div><div class="agent-fields"><label class="agent-field"><span>实际配置的记忆项目</span><input value="${esc(agent.project)}" readonly /></label><label class="agent-field"><span>选择目标项目</span><select data-project>${missing}${options}</select></label><div class="agent-field agent-field-wide"><span>配置范围</span><strong>${esc(agent.scope)}</strong><span>${esc(agent.source)}</span></div></div><div class="agent-card-actions"><button class="primary-button compact" data-apply="${esc(agent.agent)}" ${state.busy ? "disabled" : ""}>应用到 ${esc(labels[agent.agent])}</button></div></article>`;
-  }).join("") + `<article class="agent-card"><div class="agent-card-head"><strong>WorkBuddy / Antigravity</strong><span>尚无可控制的本机接入</span></div><p>这些客户端尚未由此服务读取和管理配置。</p></article>`;
+  }).join("") + `<article class="agent-card"><div class="agent-card-head"><strong>WorkBuddy</strong><span>尚无可控制的本机接入</span></div><p>该客户端尚未安装到本机，暂未由此服务读取和管理配置。</p></article>`;
 }
 
 async function refresh() {

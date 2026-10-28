@@ -251,6 +251,28 @@ async def complete_memory_maintenance(
             status_code=422,
             detail="Every note in the completed maintenance batch must be reviewed exactly once",
         )
+    effective_through_position = payload.through_position
+    if eligible_review_ids:
+        post_batch_changes = list(
+            (
+                await session.execute(
+                    select(
+                        AcceptedProjectNoteChange.partition_position,
+                        AcceptedProjectNoteChange.note_external_id,
+                    )
+                    .where(
+                        AcceptedProjectNoteChange.project_id == project,
+                        AcceptedProjectNoteChange.partition_position > payload.through_position,
+                    )
+                    .order_by(AcceptedProjectNoteChange.partition_position)
+                )
+            ).all()
+        )
+        for pos, note_ext_id in post_batch_changes:
+            if note_ext_id in eligible_review_ids:
+                effective_through_position = max(effective_through_position, int(pos))
+            else:
+                break
     checkpoint_update = await session.execute(
         update(Project)
         .where(
@@ -258,7 +280,7 @@ async def complete_memory_maintenance(
             Project.memory_maintenance_position == payload.expected_after_position,
         )
         .values(
-            memory_maintenance_position=payload.through_position,
+            memory_maintenance_position=effective_through_position,
             memory_maintenance_completed_at=completed_at,
         )
     )
@@ -277,16 +299,16 @@ async def complete_memory_maintenance(
                     project_id=project,
                     note_external_id=note_external_id,
                     reviewed_at=completed_at,
-                    reviewed_through_position=payload.through_position,
+                    reviewed_through_position=effective_through_position,
                 )
             )
         else:
             review.reviewed_at = completed_at
-            review.reviewed_through_position = payload.through_position
+            review.reviewed_through_position = effective_through_position
     await session.commit()
     return MemoryMaintenanceCompletionResponse(
         project_id=project_row.external_id,
-        through_position=payload.through_position,
+        through_position=effective_through_position,
         completed_at=completed_at,
         reviewed_note_count=len(requested_review_ids),
     )

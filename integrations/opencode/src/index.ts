@@ -31,7 +31,8 @@ export const BasicMemoryOpenCodeV1 = async (
   options?: unknown,
 ) => {
   const config = parseConfig(options ?? {});
-  const recalledSessions = new Map<string, { query: string; content: string }>();
+  const recalledSessions = new Map<string, { messageID: string; content: string }>();
+  const seenSessionNotes = new Map<string, Map<string, string>>();
   const reviews = new Map<string, { message: string; id: string; instruction: string }>();
 
   async function messages(sessionID: string) {
@@ -87,9 +88,16 @@ export const BasicMemoryOpenCodeV1 = async (
       } catch (error) { await logFailure("Semantic review", error); }
       if (config.autoRecall) try {
         const cached = recalledSessions.get(sessionID);
-        const content = cached?.query === query ? cached.content : await recall(config, query);
-        recalledSessions.set(sessionID, { query, content });
-        output.system.push(content);
+        let content: string;
+        if (cached && cached.messageID === latest.info.id) {
+          content = cached.content;
+        } else {
+          let seen = seenSessionNotes.get(sessionID);
+          if (!seen) { seen = new Map(); seenSessionNotes.set(sessionID, seen); }
+          content = await recall(config, query, { auto: true, seen });
+          recalledSessions.set(sessionID, { messageID: latest.info.id, content });
+        }
+        if (content) output.system.push(content);
       } catch (error) { recalledSessions.delete(sessionID); await logFailure("Automatic recall", error); }
     },
     event: async ({ event }: { event: { type: string; properties?: unknown } }) => {

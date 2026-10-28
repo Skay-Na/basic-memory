@@ -28,7 +28,20 @@ async function fixture() {
         if (behavior.stateOffline) { send({ isError: true, content: [{ type: 'text', text: 'offline' }] }); return }
         value = name === 'bm_capture_turn' ? { turn_count: behavior.remoteOrdinal, interval: 5, review_due: true } : args.action === 'pending' ? { reviews: [] } : { id: args.payload.review_id ?? args.payload.id, status: 'collecting' }
       }
-      else if (name === 'search_notes') value = { results: args.search_type === 'hybrid' ? [] : [{ title: 'existing', permalink: 'review/existing' }] }
+      else if (name === 'search_notes') {
+        if (args.search_type === 'hybrid' && behavior.hybridError) {
+          send({ isError: true, content: [{ type: 'text', text: 'semantic search is unavailable' }] })
+          return
+        }
+        value = {
+          results: args.search_type === 'hybrid'
+            ? (behavior.hybridResults ?? [
+                { title: 'existing', permalink: 'review/existing', updated_at: '2026-10-28T00:00:00Z' },
+                { title: 'inbox-noise', permalink: 'review/dsh/inbox/noise', metadata: { status: 'pending_review' } },
+              ])
+            : [{ title: 'existing', permalink: 'review/existing', updated_at: '2026-10-28T00:00:00Z' }],
+        }
+      }
       else if (name === 'read_note') value = notes.get(args.identifier) || { error: 'NOTE_NOT_FOUND' }
       else if (name === 'write_note') {
         if (behavior.failWrites > 0) { behavior.failWrites--; send({ isError: true, content: [{ type: 'text', text: 'offline' }] }); return }
@@ -48,24 +61,31 @@ async function fixture() {
   return { dir, ctx, handlers, tools, config, requests, notes, behavior, cleanup }
 }
 
-test('normal DSH user events are captured, and empty hybrid search falls back to text', async () => {
+test('normal DSH user events are captured, failed hybrid falls back to text, and recall filters inbox/duplicates', async () => {
   const f = await fixture()
+  f.behavior.hybridError = true
   try {
     apply(f.ctx, f.config)
     const session = { id: 'test-session', header: { cwd: '/workspace/a' } }; const agent = { session }
     const emit = f.handlers.get('session/event')
     emit(session, { type: 'turn/start', data: { turn: 1 } })
-    const msg = { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'hello' }] }
+    const msg = { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'check architecture decision' }] }
     const decision = await f.handlers.get('agent/pre-step')({ agent, messages: [msg], turn: 1, signal: new AbortController().signal }, async () => ({ kind: 'enter', messages: [msg] }))
     assert.match(decision.messages.at(-1).content[0].text, /review ID/)
+    assert.match(decision.messages.at(-1).content[0].text, /review\/existing/)
+    // Turn 2 with same note should not re-inject the already seen note
+    f.behavior.hybridError = false
+    const decision2 = await f.handlers.get('agent/pre-step')({ agent, messages: [msg], turn: 2, signal: new AbortController().signal }, async () => ({ kind: 'enter', messages: [msg] }))
+    assert.doesNotMatch(decision2.messages.at(-1).content[0].text, /<basic-memory-reference/)
+    assert.doesNotMatch(decision2.messages.at(-1).content[0].text, /inbox-noise/)
     emit(session, { type: 'user/message', data: msg })
     emit(session, { type: 'assistant/message', data: { turn: 1, message: { content: [{ type: 'text', text: 'answer' }] } } })
     emit(session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
     await waitUntil(() => f.requests.some(r => r.method === 'tools/call' && r.params.name === 'write_note'))
     const searchModes = f.requests.filter(r => r.method === 'tools/call' && r.params.name === 'search_notes').map(r => r.params.arguments.search_type)
-    assert.deepEqual(searchModes, ['hybrid', 'text'])
+    assert.deepEqual(searchModes, ['hybrid', 'text', 'hybrid'])
     const write = f.requests.find(r => r.method === 'tools/call' && r.params.name === 'write_note').params.arguments
-    assert.match(write.content, /hello/); assert.match(write.content, /answer/); assert.equal(write.overwrite, false)
+    assert.match(write.content, /check architecture decision/); assert.match(write.content, /answer/); assert.equal(write.overwrite, false)
   } finally { await f.cleanup() }
 })
 

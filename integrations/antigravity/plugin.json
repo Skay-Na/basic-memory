@@ -1,0 +1,7 @@
+{
+  "name": "basic-memory",
+  "description": "Basic Memory self-hosted backend integration for Antigravity: auto-recall and semantic capture",
+  "basicMemory": {
+    "primaryProject": "main"
+  }
+}

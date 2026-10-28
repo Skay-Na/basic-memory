@@ -1,0 +1,18 @@
+{
+  "basic-memory-hooks": {
+    "PreInvocation": [
+      {
+        "type": "command",
+        "command": "/opt/homebrew/bin/python3 scripts/hook.py pre-invocation",
+        "timeout": 15
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "/opt/homebrew/bin/python3 scripts/hook.py stop",
+        "timeout": 30
+      }
+    ]
+  }
+}

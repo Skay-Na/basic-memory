@@ -344,9 +344,11 @@ def context(
             "空标题、Untitled、UUID/时间戳/文件名堆砌、泛化收件箱标题或与正文不符的标题都要修正。"
             "标题修正应使用正文证据，保持简洁描述性，通常不超过 80 个字符；同步 frontmatter title 与首个 H1，"
             "保留原文件路径、permalink、关系和正文事实，不为改标题而移动或重命名文件。已有合格标题不要改写。"
-            "同时保留来源与范围；完成该批后用同一工具 complete，传入状态响应中的 after_position 与 through_position，"
+            "同时保留来源与范围；完成该批后用同一工具 complete，传入状态响应中的 after_position（作为 expected_after_position）与 through_position，"
             "并将 reviewed_note_ids 设为本批全部笔记的 external_id，不得遗漏，也不得加入批次外笔记。"
-            "若某篇证据不足、无法安全整理，保留原文并在本轮不要提交 complete，检查点保持不变，留待后续重试。"
+            "若批次中某条记录的 operation='deleted'，该笔记已被删除，无需读取或修改，直接确认并将其 external_id 包含在 reviewed_note_ids 中即可。"
+            "若 changed_notes 为空（例如仅因时间阈值触发且无新变更），直接以空数组 reviewed_note_ids=[] 提交 complete 以重置计时基线。"
+            "若某篇非删除笔记证据不足、无法安全整理，保留原文并在本轮不要提交 complete，检查点保持不变，留待后续重试。"
             "不要删除笔记，也不要把未整理的笔记排除在完成请求之外。"
             "若 due=false，不整理且无需提及维护检查。若工具不可用或整理无法安全完成，只在最终答复中简要说明阻塞及未完成范围。\n"
             if maintenance_enabled

@@ -320,6 +320,105 @@ async def test_memory_maintenance_requires_complete_batch_and_current_checkpoint
 
 
 @pytest.mark.asyncio
+async def test_memory_maintenance_coalesces_self_edits_to_batch_notes(
+    client: AsyncClient,
+    test_project: Project,
+    v2_projects_url: str,
+    session_maker,
+):
+    """Edits made to the reviewed batch notes before complete advance the watermark without skipping concurrent new notes."""
+    async with db.scoped_session(session_maker) as session:
+        project = await session.get(Project, test_project.id)
+        assert project is not None
+        project.partition_position = 5
+        session.add_all(
+            [
+                AcceptedProjectNoteChange(
+                    project_id=project.id,
+                    project_external_id=project.external_id,
+                    partition_position=1,
+                    entity_id=1,
+                    note_external_id="note-1",
+                    permalink="note-1",
+                    title="Note 1",
+                    operation="created",
+                    file_path="note-1.md",
+                    accepted_at=datetime.now(UTC),
+                    source="test",
+                ),
+                AcceptedProjectNoteChange(
+                    project_id=project.id,
+                    project_external_id=project.external_id,
+                    partition_position=2,
+                    entity_id=2,
+                    note_external_id="note-2",
+                    permalink="note-2",
+                    title="Note 2",
+                    operation="created",
+                    file_path="note-2.md",
+                    accepted_at=datetime.now(UTC),
+                    source="test",
+                ),
+                # Self-edit to note-1 during curation (position 3)
+                AcceptedProjectNoteChange(
+                    project_id=project.id,
+                    project_external_id=project.external_id,
+                    partition_position=3,
+                    entity_id=1,
+                    note_external_id="note-1",
+                    permalink="note-1",
+                    title="Note 1 Curated",
+                    operation="updated",
+                    file_path="note-1.md",
+                    accepted_at=datetime.now(UTC),
+                    source="test",
+                ),
+                # Concurrent external note-3 (position 4) stops coalescing
+                AcceptedProjectNoteChange(
+                    project_id=project.id,
+                    project_external_id=project.external_id,
+                    partition_position=4,
+                    entity_id=3,
+                    note_external_id="note-3",
+                    permalink="note-3",
+                    title="Note 3",
+                    operation="created",
+                    file_path="note-3.md",
+                    accepted_at=datetime.now(UTC),
+                    source="test",
+                ),
+                # Edit after note-3 (position 5) must remain after watermark so note-3 is not skipped
+                AcceptedProjectNoteChange(
+                    project_id=project.id,
+                    project_external_id=project.external_id,
+                    partition_position=5,
+                    entity_id=2,
+                    note_external_id="note-2",
+                    permalink="note-2",
+                    title="Note 2 Curated",
+                    operation="updated",
+                    file_path="note-2.md",
+                    accepted_at=datetime.now(UTC),
+                    source="test",
+                ),
+            ]
+        )
+
+    endpoint = f"{v2_projects_url}/{test_project.external_id}/memory-maintenance/complete"
+    completed = await client.post(
+        endpoint,
+        json={
+            "expected_after_position": 0,
+            "through_position": 2,
+            "reviewed_note_ids": ["note-1", "note-2"],
+        },
+    )
+    assert completed.status_code == 200
+    assert completed.json()["through_position"] == 3
+    assert completed.json()["reviewed_note_count"] == 2
+
+
+@pytest.mark.asyncio
 async def test_delete_project_by_id(
     client: AsyncClient,
     test_project: Project,

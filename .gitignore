@@ -70,3 +70,8 @@ claude-output
 /integrations/openclaw/dist/
 /integrations/openclaw/skills/
 /integrations/openclaw/*.tgz
+
+# Test and run artifacts
+.playwright-cli/
+output/
+integrations/opencode/node_modules/

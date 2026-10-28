@@ -37,7 +37,8 @@ export default Plugin.define({
   id: "basic-memory.opencode",
   async setup(ctx) {
     const config = parseConfig(ctx.options);
-    const recalledSessions = new Map<string, { query: string; content: string }>();
+    const recalledSessions = new Map<string, { messageID: string; content: string }>();
+    const seenSessionNotes = new Map<string, Map<string, string>>();
     // One prepared turn per session. Re-entrant context hooks reuse it instead of double counting.
     const turnStates = new Map<string, TurnState>();
     const turnWork = new Map<string, Promise<TurnState>>();
@@ -142,9 +143,16 @@ export default Plugin.define({
 
           if (config.autoRecall && userText) {
             const cached = recalledSessions.get(event.sessionID);
-            const content = cached?.query === userText ? cached.content : await recall(config, userText);
-            recalledSessions.set(event.sessionID, { query: userText, content });
-            event.system.push({ type: "text", text: content });
+            let content: string;
+            if (cached && cached.messageID === messageID) {
+              content = cached.content;
+            } else {
+              let seen = seenSessionNotes.get(event.sessionID);
+              if (!seen) { seen = new Map(); seenSessionNotes.set(event.sessionID, seen); }
+              content = await recall(config, userText, { auto: true, seen });
+              recalledSessions.set(event.sessionID, { messageID, content });
+            }
+            if (content) event.system.push({ type: "text", text: content });
           }
         } catch (error) {
           await logFailure("Recall and review context", error);

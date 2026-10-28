@@ -41,8 +41,12 @@ test('authenticated remote recall falls back and explicit capture cannot overwri
     else if (msg.method === 'server/discover') result = { tools: [], prompts: [], resources: [] };
     else if (msg.method === 'tools/call') {
       calls.push(msg.params);
-      const data = msg.params.name === 'search_notes' ? { results: msg.params.arguments.search_type === 'hybrid' ? [] : [{ title: 'found', permalink: 'main/found' }] } : { permalink: 'main/test' };
-      result = { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      if (msg.params.name === 'search_notes' && msg.params.arguments.search_type === 'hybrid') {
+        result = { isError: true, content: [{ type: 'text', text: 'semantic search is unavailable' }] };
+      } else {
+        const data = msg.params.name === 'search_notes' ? { results: [{ title: 'found', permalink: 'main/found', updated_at: '2026-10-28T00:00:00Z' }, { title: 'inbox', permalink: 'main/opencode/inbox/raw', metadata: { status: 'pending_review' } }] } : { permalink: 'main/test' };
+        result = { content: [{ type: 'text', text: JSON.stringify(data) }] };
+      }
     } else throw Error(`Unexpected ${msg.method}`);
     res.writeHead(200, { 'content-type': 'application/json', 'mcp-session-id': 'test-session' });
     res.end(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }));
@@ -51,11 +55,16 @@ test('authenticated remote recall falls back and explicit capture cannot overwri
   try {
     const address = server.address(); if (!address || typeof address === 'string') throw Error('missing address');
     const config = parseConfig({ endpoint: `http://127.0.0.1:${address.port}/mcp`, tokenFile: token, project: 'isolated' });
-    assert.match(await recall(config, 'topic'), /main\/found/);
+    const seen = new Map<string, string>();
+    const firstRecall = await recall(config, 'topic', { auto: true, seen });
+    assert.match(firstRecall, /main\/found/);
+    assert.doesNotMatch(firstRecall, /inbox/);
+    // Second auto recall with same note version should be suppressed
+    assert.equal(await recall(config, 'topic', { auto: true, seen }), '');
     assert.match(await capture(config, { sessionId: 'session', cwd: '/tmp', turns: [{ role: 'user', text: 'hello' }] }), /main\/test/);
     assert.deepEqual(calls.map(c => c.arguments.search_type).slice(0, 2), ['hybrid', 'text']);
-    assert.equal(calls[2].arguments.overwrite, false);
-    assert.equal(calls[2].arguments.project, 'isolated');
+    assert.equal(calls.at(-1).arguments.overwrite, false);
+    assert.equal(calls.at(-1).arguments.project, 'isolated');
     assert.throws(() => parseConfig({ endpoint: 'https://example.com', tokenFile: token, project: 'x', autoCapture: true }), /disabled/);
   } finally { server.close(); rmSync(dir, { recursive: true, force: true }); }
 });
