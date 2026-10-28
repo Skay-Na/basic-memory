@@ -1,6 +1,7 @@
 """Tests for V2 project management API routes (ID-based endpoints)."""
 
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ from httpx import AsyncClient
 from basic_memory import db
 from basic_memory.config import ProjectEntry
 from basic_memory.models import Project
+from basic_memory.models.project import AcceptedProjectNoteChange
 from basic_memory.schemas.project_info import ProjectItem, ProjectStatusResponse
 from basic_memory.schemas.v2 import ProjectResolveResponse
 from typing import Any
@@ -251,6 +253,70 @@ async def test_set_default_project_not_found(client: AsyncClient, v2_projects_ur
     response = await client.put(f"{v2_projects_url}/{fake_uuid}/default")
 
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_memory_maintenance_requires_complete_batch_and_current_checkpoint(
+    client: AsyncClient,
+    test_project: Project,
+    v2_projects_url: str,
+    session_maker,
+):
+    """A partial acknowledgement cannot hide notes, and stale callers cannot advance."""
+    async with db.scoped_session(session_maker) as session:
+        project = await session.get(Project, test_project.id)
+        assert project is not None
+        project.partition_position = 2
+        session.add_all(
+            [
+                AcceptedProjectNoteChange(
+                    project_id=project.id,
+                    project_external_id=project.external_id,
+                    partition_position=position,
+                    entity_id=position,
+                    note_external_id=f"note-{position}",
+                    permalink=f"note-{position}",
+                    title=f"Note {position}",
+                    operation="upsert",
+                    file_path=f"note-{position}.md",
+                    accepted_at=datetime.now(UTC),
+                    source="test",
+                )
+                for position in (1, 2)
+            ]
+        )
+
+    endpoint = f"{v2_projects_url}/{test_project.external_id}/memory-maintenance/complete"
+    base_payload = {"expected_after_position": 0, "through_position": 2}
+    empty_response = await client.post(
+        endpoint,
+        json={**base_payload, "reviewed_note_ids": []},
+    )
+    partial_response = await client.post(
+        endpoint,
+        json={**base_payload, "reviewed_note_ids": ["note-1"]},
+    )
+    duplicate_response = await client.post(
+        endpoint,
+        json={**base_payload, "reviewed_note_ids": ["note-1", "note-1", "note-2"]},
+    )
+
+    assert empty_response.status_code == 422
+    assert partial_response.status_code == 422
+    assert duplicate_response.status_code == 422
+
+    completed = await client.post(
+        endpoint,
+        json={**base_payload, "reviewed_note_ids": ["note-1", "note-2"]},
+    )
+    stale = await client.post(
+        endpoint,
+        json={**base_payload, "reviewed_note_ids": ["note-1", "note-2"]},
+    )
+
+    assert completed.status_code == 200
+    assert completed.json()["reviewed_note_count"] == 2
+    assert stale.status_code == 409
 
 
 @pytest.mark.asyncio

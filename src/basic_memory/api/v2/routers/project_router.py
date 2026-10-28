@@ -17,7 +17,7 @@ from typing import Literal, Optional
 
 from fastapi import APIRouter, HTTPException, Body, Query, Path
 from loguru import logger
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from basic_memory import db
 from basic_memory.deps import (
@@ -222,9 +222,11 @@ async def complete_memory_maintenance(
     project_row = await session.get(Project, project)
     if project_row is None:
         raise HTTPException(status_code=404, detail="Project not found")
+    if payload.expected_after_position != project_row.memory_maintenance_position:
+        raise HTTPException(status_code=409, detail="Maintenance checkpoint has changed")
     if payload.through_position > project_row.partition_position:
         raise HTTPException(status_code=409, detail="Checkpoint exceeds accepted project changes")
-    if payload.through_position < project_row.memory_maintenance_position:
+    if payload.through_position < payload.expected_after_position:
         raise HTTPException(status_code=409, detail="Checkpoint cannot move backwards")
     completed_at = datetime.now(UTC)
     requested_review_ids = set(payload.reviewed_note_ids)
@@ -242,11 +244,26 @@ async def complete_memory_maintenance(
             )
         ).all()
     )
-    if not requested_review_ids.issubset(eligible_review_ids):
+    if len(payload.reviewed_note_ids) != len(requested_review_ids):
+        raise HTTPException(status_code=422, detail="Reviewed note IDs must be unique")
+    if requested_review_ids != eligible_review_ids:
         raise HTTPException(
             status_code=422,
-            detail="Reviewed notes must belong to the completed maintenance batch",
+            detail="Every note in the completed maintenance batch must be reviewed exactly once",
         )
+    checkpoint_update = await session.execute(
+        update(Project)
+        .where(
+            Project.id == project,
+            Project.memory_maintenance_position == payload.expected_after_position,
+        )
+        .values(
+            memory_maintenance_position=payload.through_position,
+            memory_maintenance_completed_at=completed_at,
+        )
+    )
+    if checkpoint_update.rowcount != 1:
+        raise HTTPException(status_code=409, detail="Maintenance checkpoint has changed")
     for note_external_id in requested_review_ids:
         review = await session.scalar(
             select(MemoryMaintenanceReview).where(
@@ -266,8 +283,6 @@ async def complete_memory_maintenance(
         else:
             review.reviewed_at = completed_at
             review.reviewed_through_position = payload.through_position
-    project_row.memory_maintenance_position = payload.through_position
-    project_row.memory_maintenance_completed_at = completed_at
     await session.commit()
     return MemoryMaintenanceCompletionResponse(
         project_id=project_row.external_id,

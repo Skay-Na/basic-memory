@@ -140,6 +140,31 @@ jobs:
       - name: Validate extension, bundled skills, tests, and package
         run: just package-check-pi
 
+  opencode:
+    name: OpenCode integration
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: integrations/opencode
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Run V1 and V2 integration tests
+        run: node --import tsx --test tests/integration.test.ts tests/v2.test.ts
+
   openclaw:
     name: OpenClaw package
     permissions:

@@ -45,6 +45,7 @@ jobs:
               - 'src/**'
               - 'tests/**'
               - 'test-int/**'
+              - 'integrations/**'
               - 'alembic/**'
               - 'pyproject.toml'
               - 'uv.lock'

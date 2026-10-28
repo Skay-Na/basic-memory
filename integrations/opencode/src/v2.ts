@@ -1,6 +1,6 @@
 import { Plugin } from "@opencode/plugin";
 
-import { capture, recall, turnsFromMessages } from "./bm.js";
+import { call, capture, recall, turnsFromMessages } from "./bm.js";
 import { parseConfig } from "./config.js";
 import { ledger } from "./ledger.js";
 import { reviewComplete, reviewEdit, reviewInstruction, reviewRead, reviewSave } from "./review.js";
@@ -57,6 +57,16 @@ export default Plugin.define({
         cwd: session.location.directory,
         turns: turnsFromMessages(messages),
       };
+    }
+
+    function latestUserMessage(messages: unknown): { id: string; text: string; count: number } | undefined {
+      if (!Array.isArray(messages)) return;
+      const users = messages.filter((item: any) => (item?.info?.role ?? item?.role) === "user");
+      const last = users.at(-1) as any;
+      const id = typeof last?.info?.id === "string" ? last.info.id : last?.id;
+      if (typeof id !== "string" || !id) return;
+      const text = turnsFromMessages([last]).at(-1)?.text ?? "";
+      return { id, text, count: users.length };
     }
 
     async function logFailure(action: string, error: unknown) {
@@ -155,6 +165,22 @@ export default Plugin.define({
     const callWithCwd = async (sessionID: string, run: (cwd: string) => Promise<string>) => run(await cwdFor(sessionID));
 
     await ctx.tool.transform((editor) => {
+      editor.add({
+        name: "bm_capture_status",
+        description: "Show the effective semantic capture interval and configuration priority for this project.",
+        input: { type: "object", properties: {}, additionalProperties: false },
+        async execute() {
+          let effective = config.semanticCaptureInterval;
+          let source = "OpenCode semanticCaptureInterval";
+          if (config.stateBackend === "remote") {
+            try {
+              const setting = await call(config, "bm_capture_settings", { command: "get" });
+              if (Number.isInteger(setting?.interval)) { effective = setting.interval; source = "server project setting"; }
+            } catch { source = "server unavailable; using local setting"; }
+          }
+          return { content: `Effective semantic capture interval: ${effective} user turns. Priority: server project setting overrides OpenCode semanticCaptureInterval in remote mode; otherwise the OpenCode setting applies (default 5). Current source: ${source}.` };
+        },
+      });
       editor.add({
         name: "bm_recall",
         description: "Recall prior OpenCode session checkpoints from Basic Memory.",
@@ -274,6 +300,43 @@ export default Plugin.define({
             const cwd = await cwdFor(sessionID);
             // Close any review still in `collecting`: the turn ended without a receipt.
             await ledger(config, cwd, "idle", { session: sessionID });
+            const messages = await ctx.session.context({ sessionID: sessionID as never });
+            const lastUser = latestUserMessage(messages);
+            if (!lastUser) continue;
+            const state = await ledger(config, cwd, "turn", {
+              session: sessionID,
+              message: lastUser.id,
+              interval: config.semanticCaptureInterval,
+            });
+            const interval = Number.isInteger(state?.interval) ? state.interval : config.semanticCaptureInterval;
+            const ordinal = Number.isInteger(state?.ordinal) ? state.ordinal : lastUser.count;
+            // Full batches already received their review instruction in the context hook.
+            if (ordinal < 1 || ordinal % interval === 0) continue;
+            const row = await ledger(config, cwd, "start", {
+              session: sessionID,
+              message: lastUser.id,
+              user: lastUser.text,
+            });
+            const claim = await ledger(config, cwd, "claim_tail", { id: row.id });
+            if (!claim.claimed) continue;
+            try {
+              const pending = await ledger(config, cwd, "pending", { id: row.id });
+              const queue = config.stateBackend === "remote" ? await ledger(config, cwd, "outbox_status") : null;
+              const notice = (queue?.pending ? ` Basic Memory has ${queue.pending} locally queued state operations awaiting synchronization; do not report them as synchronized.` : "") +
+                (queue?.expired ? ` Basic Memory has ${queue.expired} expired undelivered queue entries. Their contents were cleared after seven days and must not be reported as synchronized; tell the user.` : "");
+              if ((await ledger(config, cwd, "get", { id: row.id })).status === "collecting") {
+                await ctx.session.synthetic({
+                  sessionID: sessionID as never,
+                  text: reviewInstruction(row.id, pending, ordinal % interval) + notice,
+                  description: "Basic Memory semantic tail review",
+                  delivery: "queue",
+                  resume: true,
+                });
+              }
+            } catch (error) {
+              await ledger(config, cwd, "release_tail", { id: row.id });
+              throw error;
+            }
           } catch (error) {
             await logFailure("Review receipt", error);
           }

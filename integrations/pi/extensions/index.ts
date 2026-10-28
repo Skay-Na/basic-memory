@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -237,18 +238,13 @@ async function buildRecall(
     "tool",
     "search-notes",
     "--json",
-    "--type",
-    "pi_session",
-    "--after_date",
-    cfg.recallTimeframe,
     ...projectArgs(cfg),
-    "--",
-    query?.trim() || "Pi session",
+    ...(query?.trim() ? ["--", query.trim()] : []),
   ];
   const response = await runBmJson<SearchResponse>(cfg, searchArgs, { signal, timeoutMs: 30_000 });
   const rows = response.results ?? [];
   if (rows.length === 0) {
-    return "Basic Memory found no Pi session checkpoints for this query.";
+    return "Basic Memory found no notes for this query.";
   }
 
   const recalled = rows.slice(0, 5).flatMap((row) => {
@@ -325,10 +321,10 @@ async function captureSession(
 
 export default function basicMemoryPi(pi: ExtensionAPI): void {
   let cfg: BasicMemoryPiConfig = parseConfig();
+  let lastSettledCaptureKey: string | undefined;
   let configError: string | undefined;
   let mcpRegistration: { dispose(): Promise<void> } | undefined;
   let mcpRegistrationKey: string | undefined;
-  let recalledThisSession = false;
 
   function requireValidConfig(): void {
     if (configError) throw new Error(configError);
@@ -389,12 +385,12 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
   }
 
   pi.on("session_start", async (_event, ctx) => {
+    lastSettledCaptureKey = undefined;
     try {
       await disposeCurrentMcp();
     } catch (error) {
       notify(ctx, `Basic Memory MCP cleanup failed: ${formatError(error)}`, "warning");
     }
-    recalledThisSession = false;
     await refreshConfig(ctx);
 
     if (configError) {
@@ -417,12 +413,11 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
 
   pi.on("before_agent_start", async (event, ctx) => {
     await refreshConfig(ctx);
-    if (!cfg.autoRecall || recalledThisSession || configError) return;
+    if (!cfg.autoRecall || configError) return;
     if (!canUseProjectAutomatically()) return;
-    recalledThisSession = true;
     try {
       const content = cfg.useHookFlow
-        ? await runHook(cfg, ctx, "session-start", "startup", ctx.signal)
+        ? await runHook(cfg, ctx, "session-start", "turn", ctx.signal)
         : hasProjectMapping()
           ? await buildRecall(cfg, event.prompt, ctx.signal)
           : SETUP_GUIDANCE;
@@ -454,15 +449,21 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
   pi.on("agent_settled", async (_event, ctx) => {
     await refreshConfig(ctx);
     if (!cfg.autoCapture || configError || !canUseProjectAutomatically()) return;
-    const text = extractSessionTurns(ctx.sessionManager.getBranch() as unknown[])
+    const turns = extractSessionTurns(ctx.sessionManager.getBranch() as unknown[]);
+    const text = turns
       .map((turn) => turn.text)
       .join("\n");
     if (text.length < cfg.captureMinChars) return;
+    const captureKey = createHash("sha256")
+      .update(JSON.stringify([sessionId(ctx), branchId(ctx), turns]))
+      .digest("hex");
+    if (captureKey === lastSettledCaptureKey) return;
     try {
       const message = cfg.useHookFlow
         ? await runHook(cfg, ctx, "pre-compact", "settled", ctx.signal)
         : await captureSession(cfg, ctx, undefined, ctx.signal);
       if (!message) return;
+      lastSettledCaptureKey = captureKey;
       pi.appendEntry(ENTRY_TYPE, { kind: "capture", message, at: new Date().toISOString() });
       notify(ctx, message, "info");
     } catch (error) {
@@ -483,7 +484,7 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("bm-recall", {
-    description: "Recall Basic Memory Pi checkpoints for a topic",
+    description: "Search shared Basic Memory notes for a topic",
     handler: async (args, ctx) => {
       try {
         await refreshConfig(ctx);
@@ -533,8 +534,8 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "bm_recall",
     label: "Basic Memory Recall",
-    description: "Recall recent Pi session checkpoints from Basic Memory for a topic.",
-    promptSnippet: "Recall Basic Memory checkpoints for continuity",
+    description: "Search shared Basic Memory notes, including decisions, tasks, and Pi checkpoints.",
+    promptSnippet: "Search shared Basic Memory notes for relevant context",
     parameters: Type.Object({
       query: Type.Optional(Type.String({ description: "Topic or search query" })),
     }),

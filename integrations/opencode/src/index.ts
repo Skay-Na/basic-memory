@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { capture, recall, turnsFromMessages } from "./bm.js";
+import { call, capture, recall, turnsFromMessages } from "./bm.js";
 import { parseConfig } from "./config.js";
 import V2Plugin from "./v2.js";
 import { ledger } from "./ledger.js";
@@ -105,6 +105,21 @@ export const BasicMemoryOpenCodeV1 = async (
         description: "Explicitly capture this session transcript as a pending-review checkpoint.",
         args: { title: z.string().optional() },
         async execute(args: { title?: string }, context: V1ToolContext) { return captureCurrent(context.sessionID, args.title); },
+      },
+      bm_capture_status: {
+        description: "Show the effective semantic capture interval and configuration priority for this project.",
+        args: {},
+        async execute() {
+          let effective = config.semanticCaptureInterval;
+          let source = "OpenCode semanticCaptureInterval";
+          if (config.stateBackend === "remote") {
+            try {
+              const setting = await call(config, "bm_capture_settings", { command: "get" });
+              if (Number.isInteger(setting?.interval)) { effective = setting.interval; source = "server project setting"; }
+            } catch { source = "server unavailable; using local setting"; }
+          }
+          return `Effective semantic capture interval: ${effective} user turns. Priority: server project setting overrides OpenCode semanticCaptureInterval in remote mode; otherwise the OpenCode setting applies (default 5). Current source: ${source}.`;
+        },
       },
     },
   };

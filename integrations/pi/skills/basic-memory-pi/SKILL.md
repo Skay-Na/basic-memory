@@ -1,6 +1,6 @@
 ---
 name: basic-memory-pi
-description: Use Basic Memory from Pi for durable continuity. Capture checkpoints with bm_capture, recall prior Pi checkpoints with bm_recall, and consult bundled Basic Memory skill references for note/task structure without assuming direct Basic Memory MCP tool names are available.
+description: Use Basic Memory from Pi for durable continuity. Search shared notes with bm_recall, capture checkpoints with bm_capture, and consult bundled Basic Memory skill references without assuming direct Basic Memory MCP tool names are available.
 ---
 
 # Basic Memory for Pi
@@ -11,7 +11,7 @@ Use this skill when the user asks to remember, capture, resume, continue, or rec
 
 This package exposes a Pi-native continuity surface:
 
-- `bm_recall({ query? })` — search recent Pi session checkpoints in Basic Memory.
+- `bm_recall({ query? })` — search shared Basic Memory notes, including decisions, tasks, and Pi checkpoints.
 - `bm_capture({ title? })` — capture the current Pi working thread as a durable checkpoint.
 
 The slash commands `/bm-recall`, `/bm-capture`, and `/bm-status` provide the same explicit user-facing controls.

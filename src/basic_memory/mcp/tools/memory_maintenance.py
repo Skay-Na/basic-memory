@@ -20,7 +20,8 @@ from basic_memory.mcp.server import mcp
         "request, in a later turn. Review title quality along with note content: correct "
         "generic, opaque, or misleading titles using evidence in the note, while preserving "
         "the file path and permalink. On complete, include reviewed_note_ids only for notes "
-        "actually reviewed and organized."
+        "actually reviewed and organized. The list must cover every note returned in the batch; "
+        "if any note could not be reviewed, leave the checkpoint unchanged and retry later."
     ),
     tags={"notes", "maintenance"},
     annotations={
@@ -38,6 +39,13 @@ async def memory_maintenance(
         Field(
             ge=0,
             description="For complete: the through_position returned for the finished batch.",
+        ),
+    ] = None,
+    expected_after_position: Annotated[
+        int | None,
+        Field(
+            ge=0,
+            description="For complete: the after_position returned for the finished batch.",
         ),
     ] = None,
     reviewed_note_ids: Annotated[
@@ -61,10 +69,13 @@ async def memory_maintenance(
                 batch_size=batch_size,
             )
             return status.model_dump(mode="json")
-        if through_position is None:
-            raise ValueError("complete requires through_position from the status response")
+        if through_position is None or expected_after_position is None or reviewed_note_ids is None:
+            raise ValueError(
+                "complete requires after_position, through_position, and reviewed_note_ids"
+            )
         completed = await client.complete_memory_maintenance(
             active_project.external_id,
+            expected_after_position,
             through_position,
             reviewed_note_ids,
         )

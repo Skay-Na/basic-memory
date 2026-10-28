@@ -714,6 +714,11 @@ async def _gather_context(
         )
     # General checkpoints are a lower-priority path because coding_session
     # results carry repository identity and are therefore merged first.
+    if profile.session_note_type == "pi_session":
+        # Pi's built-in recall is also the shared-memory entry point, so include
+        # all authored notes; the configured timeframe only limits continuity
+        # checkpoints, not the shared knowledge base.
+        session_queries.append(_query(project))
     session_queries.append(
         _query(project, note_types=list(profile.recall_session_types), after_date=timeframe)
     )
@@ -760,6 +765,8 @@ def _gather_remote_context(
                 "after_date": timeframe,
             }
         )
+    if profile.session_note_type == "pi_session":
+        session_queries.append({})
     session_queries.append(
         {"note_types": list(profile.recall_session_types), "after_date": timeframe}
     )
@@ -1293,8 +1300,10 @@ def _checkpoint_note(
     """
     user_messages = [text for role, text in conversation if role == "user"]
     opening = user_messages[0]
+    # Pi sends the live branch at every settle and compaction. Keep its durable
+    # checkpoint a small working excerpt; the complete transcript stays in Pi.
     recent_thread = (
-        [f"**{role}:** {message}" for role, message in conversation]
+        [f"**{role}:** {_clip(message, 400)}" for role, message in conversation[-8:]]
         if event.source == "pi"
         else [_clip(message, 200) for message in user_messages[-3:]]
     )

@@ -8,6 +8,8 @@ os.chmod(path.parent, 0o700)
 db = sqlite3.connect(path, timeout=5)
 os.chmod(path, 0o600)
 db.execute('CREATE TABLE IF NOT EXISTS reviews (id TEXT PRIMARY KEY, project TEXT NOT NULL, cwd TEXT NOT NULL, session TEXT NOT NULL, message TEXT NOT NULL, status TEXT NOT NULL, data TEXT NOT NULL, refs TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, retry_after REAL NOT NULL DEFAULT 0, created REAL NOT NULL, updated REAL NOT NULL)')
+if 'tail_prompted' not in {row[1] for row in db.execute('PRAGMA table_info(reviews)')}:
+ db.execute('ALTER TABLE reviews ADD COLUMN tail_prompted INTEGER NOT NULL DEFAULT 0')
 db.execute('CREATE TABLE IF NOT EXISTS outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT NOT NULL, cwd TEXT NOT NULL, action TEXT NOT NULL, payload TEXT NOT NULL, created REAL NOT NULL, review_id TEXT)')
 db.execute('CREATE TABLE IF NOT EXISTS capture_turns (project TEXT NOT NULL,cwd TEXT NOT NULL,session TEXT NOT NULL,message TEXT NOT NULL,PRIMARY KEY(project,cwd,session,message))')
 if 'remote_ordinal' not in {row[1] for row in db.execute('PRAGMA table_info(capture_turns)')}:
@@ -36,6 +38,10 @@ if op=='start':
  if inserted: db.execute("UPDATE reviews SET status='unresolved',retry_after=?,updated=? WHERE project=? AND cwd=? AND session=? AND message<>? AND status='collecting'",(now+300,now,project,cwd,a['session'],a['message']))
  result=get(id)
 elif op=='get': result=get(a['id'])
+elif op=='claim_tail':
+ result={'claimed':db.execute("UPDATE reviews SET tail_prompted=1,updated=? WHERE id=? AND project=? AND cwd=? AND status='collecting' AND tail_prompted=0",(now,a['id'],project,cwd)).rowcount==1}
+elif op=='release_tail':
+ db.execute("UPDATE reviews SET tail_prompted=0,updated=? WHERE id=? AND project=? AND cwd=? AND status='collecting'",(now,a['id'],project,cwd)); result={'ok':True}
 elif op=='ref':
  row=get(a['id'])
  if row['status'] not in ('collecting','pending','unresolved'): raise ValueError('Review already complete')
@@ -81,7 +87,7 @@ elif op=='set_turn_state':
  db.execute('INSERT INTO capture_settings_cache VALUES(?,?) ON CONFLICT(project) DO UPDATE SET interval=excluded.interval',(project,a['interval']))
  db.execute('UPDATE capture_turns SET remote_ordinal=? WHERE project=? AND cwd=? AND session=? AND message=?',(a['ordinal'],project,cwd,a['session'],a['message'])); result={'ok':True}
 elif op=='get_interval':
- cached=db.execute('SELECT interval FROM capture_settings_cache WHERE project=?',(project,)).fetchone(); ordinal=db.execute('SELECT remote_ordinal FROM capture_turns WHERE project=? AND cwd=? AND session=? AND message=?',(project,cwd,a['session'],a['message'])).fetchone(); result={'interval':cached[0] if cached else a['interval'],'ordinal':ordinal[0] if ordinal else None}
+ cached=db.execute('SELECT interval FROM capture_settings_cache WHERE project=?',(project,)).fetchone(); ordinal=db.execute('SELECT remote_ordinal FROM capture_turns WHERE project=? AND cwd=? AND session=? AND message=?',(project,cwd,a['session'],a['message'])).fetchone(); count=db.execute('SELECT count(*) FROM capture_turns WHERE project=? AND cwd=? AND session=?',(project,cwd,a['session'])).fetchone()[0]; result={'interval':cached[0] if cached else a['interval'],'ordinal':ordinal[0] if ordinal and ordinal[0] else count}
 else: raise ValueError('Invalid operation')
 if a.get('mirror') and op=='turn' and inserted:
  db.execute('INSERT INTO outbox(project,cwd,action,payload,created,review_id) VALUES(?,?,?,?,?,NULL)',(project,cwd,'turn',json.dumps({'session':a['session'],'turn':a['message'],'interval':a['interval']}),now))

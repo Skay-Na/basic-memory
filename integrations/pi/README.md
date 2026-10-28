@@ -46,9 +46,9 @@ Keys:
 - `bmCommand`: optional argv array that overrides `bmPath` when the CLI needs a wrapper or prefix.
 - `project` / `projectId`: explicit Basic Memory routing. `projectId` wins when set.
 - `captureFolder`: folder for Pi session checkpoints, default `pi/sessions`.
-- `recallTimeframe`: search window for recalls, default `7d`.
+- `recallTimeframe`: search window for automatic Pi checkpoint recall, default `7d`; shared-note searches include all dates.
 - `useHookFlow`: use `bm hook --harness pi` for automatic lifecycle recall/capture, default `true`.
-- `autoRecall`: inject one bounded recall before the first agent turn, default `true`; requires `BASIC_MEMORY_PI_TRUST_WORKSPACE=1` before using workspace project mappings automatically.
+- `autoRecall`: inject a bounded recall before each agent turn, default `true`; searches shared notes as well as Pi checkpoints and requires `BASIC_MEMORY_PI_TRUST_WORKSPACE=1` before using workspace project mappings automatically.
 - `autoCapture`: capture after settled turns and before compaction, default `true`; requires `BASIC_MEMORY_PI_TRUST_WORKSPACE=1` before using workspace project mappings automatically.
 - `captureMinChars`: minimum session text before auto-capture, default `80`.
 - `mcpServerName`: runtime MCP server name in MCP mode, default `basic-memory`.
@@ -68,7 +68,7 @@ For normal installs, leave `bmPath` alone and make sure `bm` is on Pi's PATH. Wo
 ## Commands and tools
 
 - `/bm-status` — show the explicit project (or `unconfigured`), workspace trust, and effective automation state. Auto recall/capture report `blocked` with the reason when a project mapping or workspace trust is missing, and `off (configured)` when disabled in settings.
-- `/bm-recall [topic]` — search recent Pi checkpoints and inject fenced reference data.
+- `/bm-recall [topic]` — search shared Basic Memory notes and inject fenced reference data.
 - `/bm-capture [title]` — write the current working thread as a `pi_session` note.
 - `bm_recall` — LLM-callable recall tool.
 - `bm_capture` — LLM-callable capture tool.
@@ -138,6 +138,6 @@ Model-backed end-to-end runs should use temporary `BASIC_MEMORY_HOME`, `BASIC_ME
 
 Automatic recall and capture default to enabled in configuration, but run only with an explicit project mapping and workspace trust. With no explicit `.pi/basic-memory.json` project mapping, manual recall shows setup guidance and automatic recall/capture are blocked, so they do not silently use an ambient default project.
 
-The package uses the shared `bm hook --harness pi` flow by default so Pi follows the same predictable Basic Memory lifecycle contract as other agent harnesses. Set `BASIC_MEMORY_PI_TRUST_WORKSPACE=1` only for workspaces you trust to enable automatic recall/capture from that workspace's project mapping. Set `"autoRecall": false`, `"autoCapture": false`, or `"useHookFlow": false` to make the behavior quieter.
+The package uses the shared `bm hook --harness pi` flow by default so Pi follows the same predictable Basic Memory lifecycle contract as other agent harnesses. Automatic recall runs before each agent turn and includes shared authored notes alongside Pi checkpoints. Set `BASIC_MEMORY_PI_TRUST_WORKSPACE=1` only for workspaces you trust to enable automatic recall/capture from that workspace's project mapping. Set `"autoRecall": false`, `"autoCapture": false`, or `"useHookFlow": false` to make the behavior quieter.
 
-Recalled notes are fenced as reference data, not instructions. Automatic captures are extractive working-thread checkpoints under `pi/sessions/`; turn text is stored so future sessions can resume from the same decisions and blockers.
+Recalled notes are fenced as reference data, not instructions. Automatic captures are extractive working-thread checkpoints under `pi/sessions/` with the `pi_session` note type. Pi checkpoints use a stable session/branch identity and overwrite that note as the branch advances. Their saved thread excerpt is bounded to the latest eight turns, with each turn clipped to 400 characters; the complete transcript remains in Pi's session history. These checkpoints are operational context, not curated semantic memory.

@@ -64,8 +64,9 @@ class ProjectClient:
     async def complete_memory_maintenance(
         self,
         project_id: str,
+        expected_after_position: int,
         through_position: int,
-        reviewed_note_ids: list[str] | None = None,
+        reviewed_note_ids: list[str],
     ) -> MemoryMaintenanceCompletionResponse:
         """Advance the checkpoint after the agent completes the returned batch."""
         from basic_memory.mcp.tools.utils import call_post
@@ -74,8 +75,9 @@ class ProjectClient:
             self.http_client,
             f"/v2/projects/{project_id}/memory-maintenance/complete",
             json={
+                "expected_after_position": expected_after_position,
                 "through_position": through_position,
-                "reviewed_note_ids": reviewed_note_ids or [],
+                "reviewed_note_ids": reviewed_note_ids,
             },
         )
         return MemoryMaintenanceCompletionResponse.model_validate(response.json())

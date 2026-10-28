@@ -41,12 +41,13 @@ class MemoryMaintenanceStatus(BaseModel):
 
 
 class MemoryMaintenanceCompletion(BaseModel):
-    """Acknowledge a bounded, successfully reviewed journal range."""
+    """Acknowledge a fully reviewed batch using its observed checkpoint."""
 
     model_config = ConfigDict(extra="forbid")
 
+    expected_after_position: int = Field(ge=0)
     through_position: int = Field(ge=0)
-    reviewed_note_ids: list[str] = Field(default_factory=list, max_length=100)
+    reviewed_note_ids: list[str] = Field(max_length=100)
 
 
 class MemoryMaintenanceCompletionResponse(BaseModel):
