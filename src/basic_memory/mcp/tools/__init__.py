@@ -13,6 +13,8 @@ from basic_memory.mcp.tools.build_context import build_context
 from basic_memory.mcp.tools.recent_activity import recent_activity
 from basic_memory.mcp.tools.read_note import read_note
 from basic_memory.mcp.tools.memory_maintenance import memory_maintenance
+from basic_memory.mcp.tools.capture_state import capture_settings, capture_turn
+from basic_memory.mcp.tools.capture_reviews import capture_review
 
 from basic_memory.mcp.tools.view_note import view_note
 from basic_memory.mcp.tools.write_note import write_note
@@ -68,6 +70,9 @@ __all__ = [
     "bm_write",
     "build_context",
     "cat",
+    "capture_turn",
+    "capture_settings",
+    "capture_review",
     "create_memory_project",
     "delete_note",
     "delete_project",
