@@ -74,10 +74,14 @@ design and remaining acceptance work.
 
 Developed against DSH `0.2.1-rc.3` public lifecycle and tool APIs. Isolated
 mock-MCP tests cover recall fallback, capture, receipts, scoped recovery, and
-inbox retry. A read-only request through the plugin client reached the actual
-Basic Memory server. The desktop plugin was reloaded on 2026-10-28 and displayed
-Running. The live DSH model's semantic review and UI presentation still require
-end-to-end review.
+inbox retry. The desktop plugin was reloaded on 2026-10-28 and displayed
+Running. On 2026-10-28 a live DSH session completed the full path: the recall
+block and the review prompt were injected, the remote capture ledger
+synchronized (outbox drained, ordinals advanced), and the model wrote one
+summarized note with `bm_review_save` before a verified `saved` receipt. The
+`write_note` / `read_note` / `edit_note` / `delete_note` contract that the
+review tools depend on was exercised against the live server. How DSH renders
+the injected context blocks in its chat UI has not been separately verified.
 
 Semantic review defaults to every five distinct user turns per session (`semanticCaptureInterval`, 1–100); it reviews the latest batch. Distinct session turn IDs are mirrored to the remote counter; its ordinal is used when reachable, with local fallback and durable retry when offline. A short final batch is not automatically reviewed. Recall and the optional raw inbox are independent.
 
