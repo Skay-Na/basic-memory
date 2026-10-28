@@ -12,7 +12,7 @@ const waitUntil = async (fn) => { for (let n = 0; n < 100; n++) { if (fn()) retu
 async function fixture() {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-bm-review-'))
   const token = join(dir, 'token'); writeFileSync(token, 'fixture', { mode: 0o600 })
-  const requests = []; const notes = new Map(); const behavior = { failWrites: 0 }
+  const requests = []; const notes = new Map(); const behavior = { failWrites: 0, stateOffline: false, remoteOrdinal: 1 }
   const server = createServer(async (req, res) => {
     if (req.method !== 'POST') { res.writeHead(405).end(); return }
     let body = ''; for await (const part of req) body += part
@@ -24,7 +24,11 @@ async function fixture() {
     if (msg.method === 'tools/call') {
       const { name, arguments: args } = msg.params
       let value
-      if (name === 'search_notes') value = { results: args.search_type === 'hybrid' ? [] : [{ title: 'existing', permalink: 'review/existing' }] }
+      if (name === 'bm_capture_turn' || name === 'bm_capture_review') {
+        if (behavior.stateOffline) { send({ isError: true, content: [{ type: 'text', text: 'offline' }] }); return }
+        value = name === 'bm_capture_turn' ? { turn_count: behavior.remoteOrdinal, interval: 5, review_due: true } : args.action === 'pending' ? { reviews: [] } : { id: args.payload.review_id ?? args.payload.id, status: 'collecting' }
+      }
+      else if (name === 'search_notes') value = { results: args.search_type === 'hybrid' ? [] : [{ title: 'existing', permalink: 'review/existing' }] }
       else if (name === 'read_note') value = notes.get(args.identifier) || { error: 'NOTE_NOT_FOUND' }
       else if (name === 'write_note') {
         if (behavior.failWrites > 0) { behavior.failWrites--; send({ isError: true, content: [{ type: 'text', text: 'offline' }] }); return }
@@ -39,7 +43,7 @@ async function fixture() {
   await new Promise(r => server.listen(0, '127.0.0.1', r))
   const handlers = new Map(); const tools = new Map(); let disposer
   const ctx = { tools: { register(t) { tools.set(t.name, t) } }, systemPrompt: { section() {} }, on(n, f) { handlers.set(n, f) }, effect(f) { disposer = f() }, logger: { warn() {} } }
-  const config = { endpoint: `http://127.0.0.1:${server.address().port}/mcp`, tokenFile: token, project: 'review', profileName: 'test', ledgerPath: join(dir, 'state', 'reviews.sqlite3'), toolTimeoutMs: 3000 }
+  const config = { endpoint: `http://127.0.0.1:${server.address().port}/mcp`, tokenFile: token, project: 'review', profileName: 'test', ledgerPath: join(dir, 'state', 'reviews.sqlite3'), toolTimeoutMs: 3000, semanticCaptureInterval: 1 }
   const cleanup = async () => { disposer?.(); await new Promise(r => setTimeout(r, 40)); await new Promise(r => server.close(r)); rmSync(dir, { recursive: true, force: true }) }
   return { dir, ctx, handlers, tools, config, requests, notes, behavior, cleanup }
 }
@@ -62,6 +66,52 @@ test('normal DSH user events are captured, and empty hybrid search falls back to
     assert.deepEqual(searchModes, ['hybrid', 'text'])
     const write = f.requests.find(r => r.method === 'tools/call' && r.params.name === 'write_note').params.arguments
     assert.match(write.content, /hello/); assert.match(write.content, /answer/); assert.equal(write.overwrite, false)
+  } finally { await f.cleanup() }
+})
+
+test('semantic review is prompted every five distinct turns per session', async () => {
+  const f = await fixture()
+  try {
+    apply(f.ctx, { ...f.config, semanticCaptureInterval: 5, autoCapture: false, autoRecall: false })
+    const agent = { session: { id: 'batch', header: { cwd: '/workspace/a' } } }
+    const msg = { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'hello' }] }
+    for (let turn = 1; turn <= 5; turn++) {
+      const decision = await f.handlers.get('agent/pre-step')({ agent, turn }, async () => ({ kind: 'enter', messages: [msg] }))
+      assert.equal(decision.messages.length, turn === 5 ? 2 : 1)
+      if (turn === 5) assert.match(decision.messages[1].content[0].text, /last 5 user turns/)
+    }
+  } finally { await f.cleanup() }
+})
+
+test('remote state outbox survives an outage and replays in order', async () => {
+  const f = await fixture(); f.behavior.stateOffline = true
+  try {
+    apply(f.ctx, { ...f.config, stateBackend: 'remote', autoCapture: false, autoRecall: false })
+    const agent = { session: { id: 'offline', header: { cwd: '/workspace/a' } } }
+    const msg = { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'hello' }] }
+    const pre = f.handlers.get('agent/pre-step')
+    await pre({ agent, turn: 1 }, async () => ({ kind: 'enter', messages: [msg] }))
+    const db = new DatabaseSync(f.config.ledgerPath)
+    try {
+      await waitUntil(() => f.requests.some(r => r.params?.name === 'bm_capture_turn'))
+      await new Promise(resolve => setTimeout(resolve, 50))
+      assert.equal(db.prepare("SELECT COUNT(*) AS n FROM capture_outbox WHERE action!='expired'").get().n, 2)
+      f.behavior.stateOffline = false
+      await pre({ agent, turn: 2 }, async () => ({ kind: 'enter', messages: [msg] }))
+      await waitUntil(() => db.prepare("SELECT COUNT(*) AS n FROM capture_outbox WHERE action!='expired'").get().n === 0)
+      assert.ok(f.requests.some(r => r.params?.name === 'bm_capture_review' && r.params.arguments.action === 'start'))
+    } finally { db.close() }
+  } finally { await f.cleanup() }
+})
+
+test('remote ordinal restores a batch after local state loss', async () => {
+  const f = await fixture(); f.behavior.remoteOrdinal = 5
+  try {
+    apply(f.ctx, { ...f.config, stateBackend: 'remote', semanticCaptureInterval: 5, autoCapture: false, autoRecall: false })
+    const agent = { session: { id: 'restored', header: { cwd: '/workspace/a' } } }
+    const msg = { role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'hello' }] }
+    const decision = await f.handlers.get('agent/pre-step')({ agent, turn: 5 }, async () => ({ kind: 'enter', messages: [msg] }))
+    assert.match(decision.messages.at(-1).content[0].text, /last 5 user turns/)
   } finally { await f.cleanup() }
 })
 
@@ -100,6 +150,54 @@ test('ledger persists pending drafts, recovers interrupted reviews, and isolates
     store.complete(empty.id, '/a', 'no_memory', 'ordinary question', [], [])
     assert.equal(store.complete(empty.id, '/a', 'no_memory', 'ordinary question', [], []).status, 'no_memory')
     assert.throws(() => store.complete(empty.id, '/a', 'saved', '', ['forged'], [])); store.close()
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('batch turn counts survive reopening and ignore duplicate turns', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-bm-count-')); const path = join(dir, 'db')
+  try {
+    let store = new Ledger(path, 'desktop', 'main')
+    for (let turn = 1; turn <= 4; turn++) assert.equal(store.captureTurn('session', turn), turn)
+    store.close()
+    store = new Ledger(path, 'desktop', 'main')
+    assert.equal(store.captureTurn('session', 4), 4)
+    assert.equal(store.captureTurn('session', 5), 5)
+    assert.equal(store.captureTurn('session', 2), 2)
+    assert.equal(store.captureTurn('other', 5), 1)
+    store.close()
+    store = new Ledger(path, 'desktop', 'other')
+    assert.equal(store.captureTurn('session', 5), 1)
+    store.close()
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('remote pending can be restored and stale unsent content expires', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-bm-restore-')); const path = join(dir, 'db')
+  try {
+    const store = new Ledger(path, 'desktop', 'main', true)
+    store.setCaptureInterval(2)
+    assert.equal(store.captureInterval(5), 2)
+    store.importPending('/a', { id: 'a'.repeat(32), session: 's', turn: '1', status: 'pending', data: { drafts: [{ title: 't', content: 'secret' }] }, verified_references: [], created: Date.now() / 1000 })
+    assert.equal(store.pending('/a', '')[0].id, 'a'.repeat(32))
+    const local = store.start('s2', 1, '/a')
+    store.db.prepare('UPDATE capture_outbox SET created=? WHERE review_id=?').run(Date.now() - 8 * 86400000, local.id)
+    store.expire()
+    assert.equal(store.get(local.id, '/a').status, 'expired')
+    assert.equal(store.expiredOutbox(), 1)
+    assert.equal(store.db.prepare('SELECT payload FROM capture_outbox WHERE review_id=?').get(local.id).payload, '{}')
+    store.close()
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('legacy local receipt enqueues its remote start and verified references', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-bm-migrate-')); const path = join(dir, 'db')
+  try {
+    let store = new Ledger(path, 'desktop', 'main'); const row = store.start('s', 1, '/a')
+    store.ref(row.id, '/a', 'main/fact'); store.close()
+    store = new Ledger(path, 'desktop', 'main', true)
+    store.complete(row.id, '/a', 'saved', '', ['main/fact'], [])
+    assert.deepEqual(store.outbox().map(event => event.action), ['start', 'ref', 'complete'])
+    store.close()
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
 

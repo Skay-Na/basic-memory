@@ -75,5 +75,10 @@ design and remaining acceptance work.
 Developed against DSH `0.2.1-rc.3` public lifecycle and tool APIs. Isolated
 mock-MCP tests cover recall fallback, capture, receipts, scoped recovery, and
 inbox retry. A read-only request through the plugin client reached the actual
-Basic Memory server. The updated desktop plugin must be reloaded, and the live
-DSH model's semantic review and UI presentation still require end-to-end review.
+Basic Memory server. The desktop plugin was reloaded on 2026-10-28 and displayed
+Running. The live DSH model's semantic review and UI presentation still require
+end-to-end review.
+
+Semantic review defaults to every five distinct user turns per session (`semanticCaptureInterval`, 1–100); it reviews the latest batch. Distinct session turn IDs are mirrored to the remote counter; its ordinal is used when reachable, with local fallback and durable retry when offline. A short final batch is not automatically reviewed. Recall and the optional raw inbox are independent.
+
+`stateBackend: remote` mirrors capture counts and review states through the MCP service with a local SQLite outbox for offline retries. Due remote reviews are restored into the same profile/workspace scope. Undelivered review content older than seven days is cleared and marked expired; turn identifiers carry no transcript content. Restart or reload DSH after changing the profile.
