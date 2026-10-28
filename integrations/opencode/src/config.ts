@@ -1,67 +1,26 @@
 export interface OpenCodeMemoryConfig {
-  bmPath: string;
-  project?: string;
-  projectId?: string;
+  endpoint: string;
+  tokenFile: string;
+  project: string;
   captureFolder: string;
-  recallTimeframe: string;
   autoRecall: boolean;
   autoCapture: boolean;
   captureMinChars: number;
+  semanticCaptureInterval: number;
+  stateBackend: "local" | "remote";
 }
-
-const DEFAULTS: OpenCodeMemoryConfig = {
-  bmPath: "bm",
-  captureFolder: "opencode/sessions",
-  recallTimeframe: "7d",
-  autoRecall: true,
-  autoCapture: true,
-  captureMinChars: 80,
-};
-
-const ALLOWED = new Set([
-  "bmPath", "project", "projectId", "captureFolder", "recallTimeframe",
-  "autoRecall", "autoCapture", "captureMinChars",
-]);
-
 export function parseConfig(value: unknown): OpenCodeMemoryConfig {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Basic Memory OpenCode plugin options must be an object");
-  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Basic Memory options must be an object");
   const raw = value as Record<string, unknown>;
-  const unknown = Object.keys(raw).filter((key) => !ALLOWED.has(key));
-  if (unknown.length) throw new Error(`Unknown Basic Memory OpenCode options: ${unknown.join(", ")}`);
-
-  for (const key of ["bmPath", "project", "projectId", "captureFolder", "recallTimeframe"] as const) {
-    const item = raw[key];
-    if (item !== undefined && (typeof item !== "string" || item.trim() === "")) {
-      throw new Error(`Basic Memory OpenCode option ${key} must be a non-empty string`);
-    }
-  }
-  for (const key of ["autoRecall", "autoCapture"] as const) {
-    if (raw[key] !== undefined && typeof raw[key] !== "boolean") {
-      throw new Error(`Basic Memory OpenCode option ${key} must be a boolean`);
-    }
-  }
-  if (raw.captureMinChars !== undefined
-    && (typeof raw.captureMinChars !== "number" || !Number.isFinite(raw.captureMinChars)
-      || raw.captureMinChars < 0)) {
-    throw new Error("Basic Memory OpenCode option captureMinChars must be a non-negative number");
-  }
-
-  return {
-    bmPath: (raw.bmPath as string | undefined)?.trim() ?? DEFAULTS.bmPath,
-    project: (raw.project as string | undefined)?.trim(),
-    projectId: (raw.projectId as string | undefined)?.trim(),
-    captureFolder: (raw.captureFolder as string | undefined)?.trim() ?? DEFAULTS.captureFolder,
-    recallTimeframe: (raw.recallTimeframe as string | undefined)?.trim() ?? DEFAULTS.recallTimeframe,
-    autoRecall: (raw.autoRecall as boolean | undefined) ?? DEFAULTS.autoRecall,
-    autoCapture: (raw.autoCapture as boolean | undefined) ?? DEFAULTS.autoCapture,
-    captureMinChars: (raw.captureMinChars as number | undefined) ?? DEFAULTS.captureMinChars,
-  };
-}
-
-export function projectArgs(config: OpenCodeMemoryConfig): string[] {
-  if (config.projectId) return ["--project-id", config.projectId];
-  if (config.project) return ["--project", config.project];
-  throw new Error("Set project or projectId in the Basic Memory OpenCode plugin options first");
+  const allowed = ["endpoint", "tokenFile", "project", "captureFolder", "autoRecall", "autoCapture", "captureMinChars", "semanticCaptureInterval", "stateBackend"];
+  const unknown = Object.keys(raw).filter(k => !allowed.includes(k));
+  if (unknown.length) throw new Error(`Unknown Basic Memory options: ${unknown.join(", ")}`);
+  for (const key of ["endpoint", "tokenFile", "project", "captureFolder"]) if (raw[key] !== undefined && (typeof raw[key] !== "string" || !raw[key].trim())) throw new Error(`${key} must be a non-empty string`);
+  for (const key of ["autoRecall", "autoCapture"]) if (raw[key] !== undefined && typeof raw[key] !== "boolean") throw new Error(`${key} must be boolean`);
+  if (raw.autoCapture === true) throw new Error("Automatic transcript capture is disabled until semantic review and recovery are implemented");
+  if (raw.stateBackend !== undefined && raw.stateBackend !== "local" && raw.stateBackend !== "remote") throw new Error("stateBackend must be local or remote");
+  if (raw.semanticCaptureInterval !== undefined && (!Number.isInteger(raw.semanticCaptureInterval) || Number(raw.semanticCaptureInterval) < 1 || Number(raw.semanticCaptureInterval) > 100)) throw new Error("semanticCaptureInterval must be an integer between 1 and 100");
+  if (raw.captureMinChars !== undefined && (typeof raw.captureMinChars !== "number" || !Number.isFinite(raw.captureMinChars) || raw.captureMinChars < 0)) throw new Error("captureMinChars must be non-negative");
+  if (!raw.project || !raw.endpoint || !raw.tokenFile) throw new Error("Set endpoint, tokenFile and project explicitly");
+  return { endpoint: String(raw.endpoint).trim(), tokenFile: String(raw.tokenFile).trim(), project: String(raw.project).trim(), captureFolder: String(raw.captureFolder ?? "opencode/inbox").trim(), autoRecall: raw.autoRecall !== false, autoCapture: false, captureMinChars: Number(raw.captureMinChars ?? 0), semanticCaptureInterval: Number(raw.semanticCaptureInterval ?? 5), stateBackend: raw.stateBackend === "remote" ? "remote" : "local" };
 }

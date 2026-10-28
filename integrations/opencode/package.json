@@ -13,13 +13,19 @@
     "url": "https://github.com/basicmachines-co/basic-memory.git",
     "directory": "integrations/opencode"
   },
-  "files": ["src/", "README.md", "LICENSE"],
+  "files": [
+    "src/",
+    "README.md",
+    "LICENSE"
+  ],
   "dependencies": {
+    "@modelcontextprotocol/client": "^2.4.0",
     "@opencode/plugin": "^2.1.4",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.9.3"
   }
 }

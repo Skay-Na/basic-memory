@@ -1,9 +1,10 @@
 import { z } from "zod";
-import type { ZodType } from "zod";
 
 import { capture, recall, turnsFromMessages } from "./bm.js";
 import { parseConfig } from "./config.js";
 import V2Plugin from "./v2.js";
+import { ledger } from "./ledger.js";
+import { reviewTools, reviewInstruction } from "./review.js";
 
 interface V1SessionMessages {
   data?: unknown[];
@@ -25,33 +26,13 @@ interface V1ToolContext {
   sessionID: string;
 }
 
-interface V1PluginHooks {
-  "experimental.chat.system.transform": (
-    input: { sessionID?: string },
-    output: { system: string[] },
-  ) => Promise<void>;
-  "experimental.session.compacting": (input: { sessionID: string }) => Promise<void>;
-  event: (input: { event: { type: string; properties?: unknown } }) => Promise<void>;
-  tool: {
-    bm_recall: {
-      description: string;
-      args: ZodType<{ query?: string }>;
-      execute(args: { query?: string }): Promise<string>;
-    };
-    bm_capture: {
-      description: string;
-      args: ZodType<{ title?: string }>;
-      execute(args: { title?: string }, context: V1ToolContext): Promise<string>;
-    };
-  };
-}
-
 export const BasicMemoryOpenCodeV1 = async (
   { client, directory }: V1PluginInput,
   options?: unknown,
-): Promise<V1PluginHooks> => {
+) => {
   const config = parseConfig(options ?? {});
-  const recalledSessions = new Set<string>();
+  const recalledSessions = new Map<string, { query: string; content: string }>();
+  const reviews = new Map<string, { message: string; id: string; instruction: string }>();
 
   async function messages(sessionID: string) {
     const result = await client.session.messages({ path: { id: sessionID } }) as V1SessionMessages;
@@ -74,51 +55,56 @@ export const BasicMemoryOpenCodeV1 = async (
   }
 
   return {
-    "experimental.chat.system.transform": async (input, output) => {
+    "experimental.chat.system.transform": async (input: { sessionID?: string }, output: { system: string[] }) => {
       const sessionID = input.sessionID;
-      if (!config.autoRecall || !sessionID || recalledSessions.has(sessionID)) return;
-      recalledSessions.add(sessionID);
+      if (!sessionID) return;
+      let latest: any; let query: string | undefined; let turnCount = 0;
       try {
-        const content = await recall(config);
-        if (output.system.length) output.system[0] = `${output.system[0]}\n\n${content}`;
-        else output.system.push(content);
-      } catch (error) {
-        recalledSessions.delete(sessionID);
-        await logFailure("Automatic recall", error);
-      }
+        const raw = await client.session.messages({ path: { id: sessionID } });
+        latest = [...(raw.data ?? [])].reverse().find((item: any) => item?.info?.role === "user");
+        turnCount = (raw.data ?? []).filter((item: any) => item?.info?.role === "user").length;
+        query = [...turnsFromMessages(raw.data)].reverse().find((turn) => turn.role === "user")?.text;
+      } catch (error) { await logFailure("Reading session", error); return; }
+      if (!query || !latest?.info?.id) return;
+      let reviewInterval = config.semanticCaptureInterval;
+      let reviewCount = turnCount;
+      if (config.stateBackend === 'remote') try {
+        const state = await ledger(config, directory, 'turn', { session: sessionID, message: latest.info.id, interval: reviewInterval });
+        reviewInterval = state.interval;
+        if (Number.isInteger(state.ordinal) && state.ordinal > 0) reviewCount = state.ordinal;
+      } catch (error) { await logFailure("Capture turn state", error); }
+      if (reviewCount % reviewInterval === 0) try {
+        let review = reviews.get(sessionID);
+        if (review?.message !== latest.info.id) {
+          const row = await ledger(config, directory, "start", { session: sessionID, message: latest.info.id, user: query });
+          const pending = await ledger(config, directory, "pending", { id: row.id });
+          const queue = config.stateBackend === "remote" ? await ledger(config, directory, "outbox_status") : null;
+          const notice = (queue?.pending ? ` Basic Memory has ${queue.pending} locally queued state operations awaiting synchronization; do not report them as synchronized.` : "") + (queue?.expired ? ` Basic Memory has ${queue.expired} expired undelivered queue entries. Their contents were cleared after seven days and must not be reported as synchronized; tell the user.` : "");
+          review = { message: latest.info.id, id: row.id, instruction: reviewInstruction(row.id, pending, reviewInterval) + notice };
+          reviews.set(sessionID, review);
+        }
+        if (review && (await ledger(config, directory, "get", { id: review.id })).status === "collecting") output.system.push(review.instruction);
+      } catch (error) { await logFailure("Semantic review", error); }
+      if (config.autoRecall) try {
+        const cached = recalledSessions.get(sessionID);
+        const content = cached?.query === query ? cached.content : await recall(config, query);
+        recalledSessions.set(sessionID, { query, content });
+        output.system.push(content);
+      } catch (error) { recalledSessions.delete(sessionID); await logFailure("Automatic recall", error); }
     },
-    "experimental.session.compacting": async ({ sessionID }) => {
-      if (!config.autoCapture) return;
-      try {
-        await captureCurrent(sessionID);
-      } catch (error) {
-        await logFailure("Compaction checkpoint", error);
-      }
-    },
-    event: async ({ event }) => {
-      if (event.type !== "session.idle" || !config.autoCapture) return;
+    event: async ({ event }: { event: { type: string; properties?: unknown } }) => {
+      if (event.type !== "session.idle") return;
       const sessionID = (event.properties as { sessionID?: unknown } | undefined)?.sessionID;
-      if (typeof sessionID !== "string") return;
-      try {
-        await captureCurrent(sessionID);
-      } catch (error) {
-        await logFailure("Automatic capture", error);
+      if (typeof sessionID === "string") {
+        try { await ledger(config, directory, "idle", { session: sessionID }); } catch (error) { await logFailure("Review receipt", error); }
       }
     },
     tool: {
-      bm_recall: {
-        description: "Recall prior OpenCode session checkpoints from Basic Memory.",
-        args: z.object({ query: z.string().optional() }),
-        async execute(args) {
-          return recall(config, args.query);
-        },
-      },
+      ...reviewTools(config, directory),
       bm_capture: {
-        description: "Capture the current OpenCode session as a durable Basic Memory checkpoint.",
-        args: z.object({ title: z.string().optional() }),
-        async execute(args, context) {
-          return captureCurrent(context.sessionID, args.title);
-        },
+        description: "Explicitly capture this session transcript as a pending-review checkpoint.",
+        args: { title: z.string().optional() },
+        async execute(args: { title?: string }, context: V1ToolContext) { return captureCurrent(context.sessionID, args.title); },
       },
     },
   };
