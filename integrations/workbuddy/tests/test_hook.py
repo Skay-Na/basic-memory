@@ -25,13 +25,105 @@ class WorkBuddyHookTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        env = patch.dict(os.environ, {"BASIC_MEMORY_WORKBUDDY_STATE_DIR": self.temp.name})
+        env = patch.dict(
+            os.environ,
+            {
+                "BASIC_MEMORY_WORKBUDDY_STATE_DIR": self.temp.name,
+                "BASIC_MEMORY_STATE_BACKEND": "local",
+            },
+        )
         env.start()
         self.addCleanup(env.stop)
 
     def begin(self, prompt="prompt", session="session", transcript=None):
         data = hook.HookInput("UserPromptSubmit", session, transcript, "/work", prompt, "")
         return hook.begin_review(data)
+
+    def test_batch_count_is_per_session(self):
+        with patch.dict(os.environ, {"BASIC_MEMORY_CAPTURE_INTERVAL": "5"}):
+            self.assertEqual([hook.capture_due("a") for _ in range(5)], [False] * 4 + [True])
+            self.assertFalse(hook.capture_due("b"))
+
+    def test_remote_interval_cache_controls_batch(self):
+        with patch.dict(os.environ, {"BASIC_MEMORY_STATE_BACKEND": "remote"}):
+            with hook.closing(hook.state_database()) as db, db:
+                db.execute("INSERT INTO capture_settings_cache VALUES (?,?)", (hook.PROJECT, 2))
+            self.assertFalse(hook.capture_due("session", "/work"))
+            self.assertTrue(hook.capture_due("session", "/work"))
+
+    def test_remote_ordinal_recovers_after_local_state_loss(self):
+        class Client:
+            def initialize(self):
+                pass
+
+            def call_tool(self, name, args):
+                return {
+                    "structuredContent": {"turn_count": 5, "interval": 5}
+                    if name == "bm_capture_turn"
+                    else {"reviews": []}
+                }
+
+        with (
+            patch.dict(os.environ, {"BASIC_MEMORY_STATE_BACKEND": "remote"}),
+            patch.object(hook, "StreamableHttpClient", Client),
+        ):
+            self.assertTrue(hook.capture_due("session", "/work"))
+
+    def test_remote_outbox_replays_after_failure(self):
+        class Client:
+            offline = True
+            calls = []
+
+            def initialize(self):
+                if self.offline:
+                    raise RuntimeError("offline")
+
+            def call_tool(self, name, args):
+                self.calls.append((name, args))
+                value = (
+                    {"reviews": []}
+                    if args.get("action") == "pending"
+                    else (
+                        {"id": args["payload"]["review_id"]}
+                        if args.get("action") == "start"
+                        else {"ok": True}
+                    )
+                )
+                return {"structuredContent": value}
+
+        with (
+            patch.dict(os.environ, {"BASIC_MEMORY_STATE_BACKEND": "remote"}),
+            patch.object(hook, "StreamableHttpClient", Client),
+        ):
+            hook.capture_due("session", "/work")
+            review = self.begin()
+            hook.record_receipt(review, {"status": "no_memory", "reason": "none"})
+            hook.flush_state("/work")
+            with hook.closing(hook.state_database()) as db:
+                self.assertEqual(db.execute("SELECT count(*) FROM capture_outbox").fetchone()[0], 4)
+            Client.offline = False
+            hook.flush_state("/work")
+            with hook.closing(hook.state_database()) as db:
+                self.assertEqual(db.execute("SELECT count(*) FROM capture_outbox").fetchone()[0], 0)
+            self.assertEqual(
+                [item[0] for item in Client.calls],
+                [
+                    "bm_capture_turn",
+                    "bm_capture_review",
+                    "bm_capture_review",
+                    "bm_capture_review",
+                    "bm_capture_review",
+                ],
+            )
+
+    def test_legacy_local_receipt_enqueues_remote_start(self):
+        review = self.begin()
+        with patch.dict(os.environ, {"BASIC_MEMORY_STATE_BACKEND": "remote"}):
+            hook.record_receipt(review, {"status": "no_memory", "reason": "none"})
+        with hook.closing(hook.state_database()) as db:
+            rows = db.execute("SELECT action,payload FROM capture_outbox ORDER BY seq").fetchall()
+        self.assertEqual([row["action"] for row in rows], ["start", "complete"])
+        self.assertEqual(json.loads(rows[0]["payload"])["review_id"], review)
 
     def write_transcript(self, entries):
         path = Path(self.temp.name) / "transcript.jsonl"
@@ -111,7 +203,11 @@ class WorkBuddyHookTests(unittest.TestCase):
             hook.validate_receipt({"status": "pending", "failure_kind": [], "drafts": [draft]})
 
     def test_hook_emits_review_and_accepts_receipt_when_recall_fails(self):
-        env = {**os.environ, "BASIC_MEMORY_TOKEN_FILE": str(Path(self.temp.name) / "missing")}
+        env = {
+            **os.environ,
+            "BASIC_MEMORY_TOKEN_FILE": str(Path(self.temp.name) / "missing"),
+            "BASIC_MEMORY_CAPTURE_INTERVAL": "1",
+        }
         event = {
             "hook_event_name": "UserPromptSubmit",
             "session_id": "s",

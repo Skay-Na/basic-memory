@@ -1,6 +1,6 @@
 # Basic Memory for WorkBuddy
 
-This WorkBuddy integration combines an HTTPS Streamable HTTP MCP connector, two Skills, and command lifecycle hooks. MCP performs memory operations; Skills make the semantic decision; hooks inject a per-turn review marker, keep local receipts, and recover unfinished reviews.
+This WorkBuddy integration combines an HTTPS Streamable HTTP MCP connector, two Skills, and command lifecycle hooks. MCP performs memory operations; Skills make the semantic decision; hooks inject a batched review marker, keep local receipts, and recover unfinished reviews.
 
 ## Install
 
@@ -32,7 +32,7 @@ These existing MCP operations are backward compatible with Codex. WorkBuddy-spec
 The separate [`hooks/`](hooks/) directory contains the handler and settings fragment for the event contract in Tencent's [WorkBuddy Enterprise Hooks manual](https://cloud.tencent.com/document/product/1831/134517):
 
 - `SessionStart` recalls recent project decisions and prompts recovery of due reviews.
-- `UserPromptSubmit` recalls the current topic and creates a local `collecting` receipt with a `basic-memory-review` marker. The Skill completes semantic review before the answer and submits `saved`, `no_memory`, or `pending`.
+- `UserPromptSubmit` recalls the current topic and every five submissions per session creates a local `collecting` receipt with a `basic-memory-review` marker. Set `BASIC_MEMORY_CAPTURE_INTERVAL` to an integer from 1 to 100 to change the interval. The review covers the latest batch; a shorter final batch is not automatically reviewed. WorkBuddy does not provide a reliable turn ID, so duplicate hook submissions count separately. The Skill completes semantic review before the answer and submits `saved`, `no_memory`, or `pending`.
 - `Stop` marks a missing receipt `unresolved` and returns without blocking the response or creating a visible continuation.
 - `PreCompact` adds compacting guidance for confirmed decisions and outstanding review ids; it does not upload the transcript.
 - `SessionEnd` marks unfinished reviews `unresolved`; it does not upload raw session text.
@@ -52,3 +52,5 @@ The official hook manual describes CodeBuddy IDE events and inputs/outputs but d
 - [WorkBuddy Enterprise Hooks manual](https://cloud.tencent.com/document/product/1831/134517)
 - Project service status and access constraints: [`deployment/运行说明.md`](../../../deployment/运行说明.md)
 - Agent connection guide: [`deployment/Agent自托管记忆后端接入指南.md`](../../../deployment/Agent自托管记忆后端接入指南.md)
+
+Remote state is enabled by default through the existing MCP connection; `BASIC_MEMORY_STATE_BACKEND=local` opts out. A private local SQLite outbox temporarily retains unsent operations and retries on later hook activity. Due remote pending reviews are restored; permission failures stay paused until explicitly resumed. Unsent review content expires after seven days and is marked as unconfirmed. The host lacks a reliable turn ID, so duplicate prompt hook invocations can still count twice.

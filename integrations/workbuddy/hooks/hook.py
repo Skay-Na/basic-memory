@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import shlex
 import sqlite3
@@ -262,6 +263,21 @@ def state_database() -> sqlite3.Connection:
         )
         """
     )
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS capture_counts (session_id TEXT PRIMARY KEY, "
+        "turns INTEGER NOT NULL, updated REAL NOT NULL)"
+    )
+    count_columns = {row["name"] for row in connection.execute("PRAGMA table_info(capture_counts)")}
+    if "remote_ordinal" not in count_columns:
+        connection.execute("ALTER TABLE capture_counts ADD COLUMN remote_ordinal INTEGER")
+    if "remote_turn" not in count_columns:
+        connection.execute("ALTER TABLE capture_counts ADD COLUMN remote_turn TEXT")
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS capture_outbox (seq INTEGER PRIMARY KEY AUTOINCREMENT, cwd TEXT NOT NULL, action TEXT NOT NULL, payload TEXT NOT NULL, created REAL NOT NULL, review_id TEXT)"
+    )
+    connection.execute(
+        "CREATE TABLE IF NOT EXISTS capture_settings_cache (project TEXT PRIMARY KEY, interval INTEGER NOT NULL)"
+    )
     review_columns = {
         row["name"] for row in connection.execute("PRAGMA table_info(reviews)").fetchall()
     }
@@ -269,6 +285,161 @@ def state_database() -> sqlite3.Connection:
         connection.execute("ALTER TABLE reviews ADD COLUMN prompt_text TEXT NOT NULL DEFAULT ''")
     connection.commit()
     return connection
+
+
+def enqueue(
+    connection: sqlite3.Connection,
+    cwd: str,
+    action: str,
+    payload: dict[str, JsonValue],
+    review_id: str | None = None,
+) -> None:
+    if os.environ.get("BASIC_MEMORY_STATE_BACKEND", "remote") == "remote":
+        connection.execute(
+            "INSERT INTO capture_outbox(cwd,action,payload,created,review_id) VALUES(?,?,?,?,?)",
+            (cwd, action, json.dumps(payload, ensure_ascii=False), time.time(), review_id),
+        )
+
+
+def flush_state(cwd: str) -> None:
+    if os.environ.get("BASIC_MEMORY_STATE_BACKEND", "remote") != "remote":
+        return
+    try:
+        with closing(state_database()) as connection, connection:
+            expire_old_reviews(connection, time.time())
+            rows = connection.execute(
+                "SELECT * FROM capture_outbox WHERE cwd=? AND action!='expired' ORDER BY seq LIMIT 20",
+                (cwd,),
+            ).fetchall()
+        client = StreamableHttpClient()
+        client.initialize()
+        scope = hashlib.sha256(cwd.encode()).hexdigest()
+        for row in rows:
+            payload = json.loads(row["payload"])
+            args = {"agent": "workbuddy", "project": PROJECT, "scope": scope}
+            if row["action"] == "turn":
+                args.update(payload)
+                result = client.call_tool("bm_capture_turn", args)
+            else:
+                args.update({"action": row["action"], "payload": payload})
+                result = client.call_tool("bm_capture_review", args)
+            value = json.loads(result_text(result))
+            if row["action"] == "start" and value.get("id") != payload["review_id"]:
+                raise ValueError("Remote review identifier mismatch")
+            with closing(state_database()) as connection, connection:
+                if (
+                    row["action"] == "turn"
+                    and type(value.get("interval")) is int
+                    and 1 <= value["interval"] <= 100
+                ):
+                    connection.execute(
+                        "INSERT INTO capture_settings_cache(project,interval) VALUES(?,?) ON CONFLICT(project) DO UPDATE SET interval=excluded.interval",
+                        (PROJECT, value["interval"]),
+                    )
+                if (
+                    row["action"] == "turn"
+                    and type(value.get("turn_count")) is int
+                    and value["turn_count"] > 0
+                ):
+                    connection.execute(
+                        "UPDATE capture_counts SET remote_ordinal=?,remote_turn=? WHERE session_id=?",
+                        (value["turn_count"], payload["turn"], payload["session"]),
+                    )
+                connection.execute("DELETE FROM capture_outbox WHERE seq=?", (row["seq"],))
+        result = client.call_tool(
+            "bm_capture_review",
+            {
+                "agent": "workbuddy",
+                "project": PROJECT,
+                "scope": scope,
+                "action": "pending",
+                "payload": {},
+            },
+        )
+        remote = json.loads(result_text(result))
+        if not isinstance(remote.get("reviews"), list):
+            raise ValueError("Invalid remote pending reviews")
+        with closing(state_database()) as connection, connection:
+            for review in remote["reviews"]:
+                if (
+                    not isinstance(review, dict)
+                    or review.get("status") not in {"pending", "unresolved"}
+                    or not isinstance(review.get("data"), dict)
+                ):
+                    raise ValueError("Invalid remote pending review")
+                receipt = {"status": review["status"], **review["data"]}
+                retry_after = -1 if receipt.get("failure_kind") == "permission" else 0
+                connection.execute(
+                    "INSERT OR IGNORE INTO reviews(review_id,session_id,cwd,transcript_path,prompt_text,project,status,receipt_json,attempts,retry_after,created,updated) VALUES(?,?,?,NULL,?,?,?,?,?,?,?,?)",
+                    (
+                        review["id"],
+                        review["session"],
+                        cwd,
+                        str(review["data"].get("prompt", "")),
+                        PROJECT,
+                        review["status"],
+                        json.dumps(receipt, ensure_ascii=False),
+                        review.get("attempts", 0),
+                        retry_after,
+                        review.get("created", time.time()),
+                        time.time(),
+                    ),
+                )
+    except Exception as error:
+        print(
+            f"Basic Memory remote state synchronization deferred ({type(error).__name__}).",
+            file=sys.stderr,
+        )
+
+
+def capture_due(session_id: str, cwd: str = "") -> bool:
+    interval = int(os.environ.get("BASIC_MEMORY_CAPTURE_INTERVAL", "5"))
+    if not 1 <= interval <= 100 or not session_id:
+        raise ValueError("Capture interval must be 1..100 and session_id must be present")
+    turn_id = str(uuid.uuid4())
+    with closing(state_database()) as connection, connection:
+        if os.environ.get("BASIC_MEMORY_STATE_BACKEND", "remote") == "remote":
+            cached = connection.execute(
+                "SELECT interval FROM capture_settings_cache WHERE project=?", (PROJECT,)
+            ).fetchone()
+            if cached is not None:
+                interval = cached["interval"]
+        connection.execute(
+            "INSERT INTO capture_counts(session_id,turns,updated) VALUES (?, 1, ?) ON CONFLICT(session_id) "
+            "DO UPDATE SET turns=turns+1, updated=excluded.updated",
+            (session_id, time.time()),
+        )
+        count = connection.execute(
+            "SELECT turns FROM capture_counts WHERE session_id=?", (session_id,)
+        ).fetchone()[0]
+        enqueue(
+            connection,
+            cwd,
+            "turn",
+            {"session": session_id, "turn": turn_id, "interval": interval},
+        )
+        connection.execute(
+            "DELETE FROM capture_counts WHERE updated < ?", (time.time() - 30 * 86400,)
+        )
+    if os.environ.get("BASIC_MEMORY_STATE_BACKEND", "remote") == "remote":
+        flush_state(cwd)
+        with closing(state_database()) as connection:
+            cached = connection.execute(
+                "SELECT interval FROM capture_settings_cache WHERE project=?", (PROJECT,)
+            ).fetchone()
+            remote = connection.execute(
+                "SELECT remote_ordinal,remote_turn FROM capture_counts WHERE session_id=?",
+                (session_id,),
+            ).fetchone()
+            if cached is not None:
+                interval = cached["interval"]
+            if (
+                remote is not None
+                and remote["remote_turn"] == turn_id
+                and remote["remote_ordinal"] is not None
+            ):
+                count = remote["remote_ordinal"]
+    return count % interval == 0
 
 
 def begin_review(hook: HookInput) -> str:
@@ -294,6 +465,18 @@ def begin_review(hook: HookInput) -> str:
                 now,
             ),
         )
+        enqueue(
+            connection,
+            hook.cwd,
+            "start",
+            {
+                "review_id": review_id,
+                "session": hook.session_id or "unknown",
+                "turn": review_id,
+                "data": {"prompt": hook.prompt},
+            },
+            review_id,
+        )
     return review_id
 
 
@@ -306,6 +489,18 @@ def expire_old_reviews(connection: sqlite3.Connection, now: float) -> int:
         """,
         (now, now - REVIEW_TTL_SECONDS),
     )
+    expired = connection.execute(
+        "SELECT DISTINCT review_id FROM capture_outbox WHERE review_id IS NOT NULL AND action!='expired' AND created<?",
+        (now - REVIEW_TTL_SECONDS,),
+    ).fetchall()
+    for row in expired:
+        connection.execute(
+            "UPDATE reviews SET status='expired',receipt_json='{}',prompt_text='',transcript_path=NULL,updated=? WHERE review_id=?",
+            (now, row[0]),
+        )
+        connection.execute(
+            "UPDATE capture_outbox SET action='expired',payload='{}' WHERE review_id=?", (row[0],)
+        )
     return cursor.rowcount
 
 
@@ -338,6 +533,10 @@ def mark_session_unresolved(session_id: str) -> None:
         return
     now = time.time()
     with closing(state_database()) as connection, connection:
+        rows = connection.execute(
+            "SELECT review_id,cwd,prompt_text,session_id FROM reviews WHERE session_id=? AND status='collecting'",
+            (session_id,),
+        ).fetchall()
         connection.execute(
             """
             UPDATE reviews SET status='unresolved', updated=?
@@ -345,6 +544,26 @@ def mark_session_unresolved(session_id: str) -> None:
             """,
             (now, session_id),
         )
+        for row in rows:
+            enqueue(
+                connection,
+                row["cwd"],
+                "start",
+                {
+                    "review_id": row["review_id"],
+                    "session": row["session_id"],
+                    "turn": row["review_id"],
+                    "data": {"prompt": row["prompt_text"]},
+                },
+                row["review_id"],
+            )
+            enqueue(
+                connection,
+                row["cwd"],
+                "unresolved",
+                {"id": row["review_id"], "data": {"prompt": row["prompt_text"]}},
+                row["review_id"],
+            )
 
 
 def validate_receipt(payload: object) -> tuple[str, dict[str, JsonValue]]:
@@ -409,7 +628,7 @@ def record_receipt(review_id: str, payload: object) -> dict[str, JsonValue]:
     with closing(state_database()) as connection, connection:
         expire_old_reviews(connection, now)
         row = connection.execute(
-            "SELECT status, attempts, prompt_text, transcript_path FROM reviews WHERE review_id=?",
+            "SELECT status, attempts, prompt_text, transcript_path, cwd,session_id FROM reviews WHERE review_id=?",
             (review_id,),
         ).fetchone()
         if row is None:
@@ -440,6 +659,30 @@ def record_receipt(review_id: str, payload: object) -> dict[str, JsonValue]:
                 review_id,
             ),
         )
+        enqueue(
+            connection,
+            row["cwd"],
+            "start",
+            {
+                "review_id": review_id,
+                "session": row["session_id"],
+                "turn": review_id,
+                "data": {"prompt": row["prompt_text"]},
+            },
+            review_id,
+        )
+        for reference in receipt.get("references", []):
+            enqueue(
+                connection, row["cwd"], "ref", {"id": review_id, "reference": reference}, review_id
+            )
+        data = {key: value for key, value in receipt.items() if key != "status"}
+        enqueue(
+            connection,
+            row["cwd"],
+            "complete",
+            {"id": review_id, "status": status, "data": data},
+            review_id,
+        )
     return {"review_id": review_id, "status": status, "attempts": attempts}
 
 
@@ -455,6 +698,39 @@ def resume_review(review_id: str) -> dict[str, JsonValue]:
         )
         if cursor.rowcount != 1:
             raise ValueError("Review is not a pending permission-blocked item")
+        row = connection.execute(
+            "SELECT cwd,session_id,prompt_text,receipt_json FROM reviews WHERE review_id=?",
+            (review_id,),
+        ).fetchone()
+        receipt = json.loads(row["receipt_json"])
+        enqueue(
+            connection,
+            row["cwd"],
+            "start",
+            {
+                "review_id": review_id,
+                "session": row["session_id"],
+                "turn": review_id,
+                "data": {"prompt": row["prompt_text"]},
+            },
+            review_id,
+        )
+        for reference in receipt.get("references", []):
+            enqueue(
+                connection, row["cwd"], "ref", {"id": review_id, "reference": reference}, review_id
+            )
+        enqueue(
+            connection,
+            row["cwd"],
+            "complete",
+            {
+                "id": review_id,
+                "status": "pending",
+                "data": {key: value for key, value in receipt.items() if key != "status"},
+            },
+            review_id,
+        )
+        enqueue(connection, row["cwd"], "resume", {"id": review_id}, review_id)
     return {"review_id": review_id, "status": "pending", "retry_enabled": True}
 
 
@@ -502,11 +778,28 @@ def receipt_command(action: str, review_id: str) -> str:
 
 def review_context(review_id: str | None, cwd: str) -> str:
     sections: list[str] = []
+    interval = os.environ.get("BASIC_MEMORY_CAPTURE_INTERVAL", "5")
+    if os.environ.get("BASIC_MEMORY_STATE_BACKEND", "remote") == "remote":
+        with closing(state_database()) as connection:
+            cached = connection.execute(
+                "SELECT interval FROM capture_settings_cache WHERE project=?", (PROJECT,)
+            ).fetchone()
+            if cached is not None:
+                interval = str(cached["interval"])
+            expired = connection.execute(
+                "SELECT count(*) FROM capture_outbox WHERE cwd=? AND action='expired'", (cwd,)
+            ).fetchone()[0]
+        if expired:
+            sections.append(
+                f"Basic Memory has {expired} expired undelivered state operations; their contents were cleared and must not be reported as synchronized. Inform the user."
+            )
     if review_id:
         sections.append(
             "[basic-memory-review:" + review_id + "]\n"
             "Before the final answer, invoke the `basic-memory-capture` Skill. "
-            "It decides whether this turn contains durable memory, searches before writing, "
+            "Review the latest "
+            + interval
+            + " user turns and their outcomes for durable memory, search before writing, "
             "and submits exactly one receipt. Receipt command: `"
             + receipt_command("receipt", review_id)
             + "` (send the JSON receipt on stdin)."
@@ -545,6 +838,7 @@ def hook_output(event: str, *, context: str = "", system_message: str = "") -> N
 
 def execute(action: str, hook: HookInput) -> None:
     if action == "session-start":
+        flush_state(hook.cwd)
         try:
             recalled = recall("recent decisions, active work, and project checkpoints")
         except Exception as error:
@@ -554,17 +848,19 @@ def execute(action: str, hook: HookInput) -> None:
         context = "\n\n".join(part for part in (recalled, follow_up) if part)
         hook_output(hook.event, context=context)
     elif action == "user-prompt-submit":
-        review_id = begin_review(hook)
+        review_id = begin_review(hook) if capture_due(hook.session_id, hook.cwd) else None
         try:
             recalled = recall(hook.prompt)
         except Exception as error:
             print(f"Basic Memory recall skipped ({type(error).__name__}).", file=sys.stderr)
             recalled = ""
-        capture = review_context(review_id, hook.cwd)
+        capture = review_context(review_id, hook.cwd) if review_id else ""
+        flush_state(hook.cwd)
         context = "\n\n".join(part for part in (recalled, capture) if part)
         hook_output(hook.event, context=context)
     elif action == "stop":
         mark_session_unresolved(hook.session_id)
+        flush_state(hook.cwd)
         hook_output(hook.event)
     elif action == "pre-compact":
         context = review_context(None, hook.cwd)
@@ -581,6 +877,7 @@ def execute(action: str, hook: HookInput) -> None:
         hook_output(hook.event, context=context)
     elif action == "session-end":
         mark_session_unresolved(hook.session_id)
+        flush_state(hook.cwd)
         hook_output(hook.event)
     else:
         raise ValueError(f"Unsupported WorkBuddy hook action: {action}")
@@ -592,6 +889,12 @@ def main(arguments: Sequence[str]) -> int:
             if len(arguments) != 2:
                 raise ValueError("receipt requires a review id")
             receipt = record_receipt(arguments[1], json.loads(sys.stdin.read()))
+            with closing(state_database()) as connection:
+                row = connection.execute(
+                    "SELECT cwd FROM reviews WHERE review_id=?", (arguments[1],)
+                ).fetchone()
+            if row is not None:
+                flush_state(row["cwd"])
             print(json.dumps(receipt, ensure_ascii=False))
             return 0
         if arguments and arguments[0] == "show":
@@ -603,6 +906,12 @@ def main(arguments: Sequence[str]) -> int:
             if len(arguments) != 2:
                 raise ValueError("retry requires a review id")
             print(json.dumps(resume_review(arguments[1]), ensure_ascii=False))
+            with closing(state_database()) as connection:
+                row = connection.execute(
+                    "SELECT cwd FROM reviews WHERE review_id=?", (arguments[1],)
+                ).fetchone()
+            if row is not None:
+                flush_state(row["cwd"])
             return 0
         if arguments and arguments[0] == "cleanup":
             if len(arguments) != 1:

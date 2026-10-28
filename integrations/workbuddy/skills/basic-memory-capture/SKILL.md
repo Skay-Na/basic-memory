@@ -9,7 +9,7 @@ description_en: Review each WorkBuddy turn for durable memory, deduplicate befor
 
 # Basic Memory 语义捕捉
 
-当当前上下文包含 `[basic-memory-review:<id>]` 时，在最终答复前完成这个回合的记忆审查和本地回执。此标记由 WorkBuddy `UserPromptSubmit` Hook 创建。没有标记时，不要伪造 review id。
+当当前上下文包含 `[basic-memory-review:<id>]` 时，在最终答复前按 Hook 提示审查最近多轮对话及其结果并提交本地回执。此标记由 WorkBuddy `UserPromptSubmit` Hook 创建。没有标记时，不要伪造 review id。
 
 ## 判断是否值得保存
 
