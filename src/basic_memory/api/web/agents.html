@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f8f7f4" />
+    <title>Agent 记忆路由 · Basic Memory</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20261028-agent-routing" />
+    <link rel="stylesheet" href="/assets/agents.css?v=20261028-routing-control" />
+  </head>
+  <body class="agents-page">
+    <main class="agents-shell">
+      <header class="agents-header">
+        <a class="agents-back" href="/">← 返回记忆库</a>
+        <div class="agents-title-row"><div><p class="eyebrow">BASIC MEMORY · SETTINGS</p><h1>Agent 记忆路由</h1></div></div>
+        <p class="agents-intro">读取此设备上的实际客户端配置，选择后端中已存在的记忆项目并应用到对应 agent。</p>
+        <div class="agents-notice"><strong>生效方式</strong><span>页面读取的是配置文件；运行中的客户端可能仍使用旧配置。修改后请重新加载或重启对应客户端，Codex 工作目录也可能覆盖用户级设置。</span></div>
+        <label class="agent-field agent-field-wide" for="workspace"><span>Codex / OpenCode 工作目录（用于检查项目级配置）</span><input id="workspace" placeholder="本机用户目录内的完整路径" /></label>
+        <div class="agents-footer"><button class="secondary-button" id="refresh-agents" type="button">读取本机配置</button><span id="save-status" role="status">正在连接本机配置服务…</span></div>
+      </header>
+      <section class="agent-card" aria-labelledby="capture-title">
+        <div class="agent-card-head"><strong id="capture-title">自动记忆提取间隔</strong><span>项目级设置</span></div>
+        <p>每隔指定数量的用户回合检查一次长期记忆。已接入的 Agent 在下次同步后使用新设置；离线时继续使用最近一次的值。</p>
+        <form id="capture-form" class="agent-fields">
+          <label class="agent-field"><span>记忆项目</span><select id="capture-project" required></select></label>
+          <label class="agent-field"><span>每多少轮检查一次（1–100）</span><input id="capture-interval" type="number" min="1" max="100" step="1" required /></label>
+          <div class="agent-card-actions"><button class="primary-button compact" type="submit">保存间隔</button><span id="capture-status" role="status"></span></div>
+        </form>
+      </section>
+      <section class="agents-summary" aria-live="polite">
+        <div><strong id="agent-count">—</strong><span>个可读取的 agent</span></div>
+        <div><strong id="registry-project">—</strong><span>个后端项目可选择</span></div>
+      </section>
+      <section class="agents-list" id="agents-list" aria-live="polite"></section>
+      <p class="agents-footnote">此页面通过本机服务读取和修改这台 Mac 的客户端配置；其他设备需要各自的接入服务。共享 MCP 凭据本身不提供按 agent 的项目隔离。</p>
+    </main>
+    <script src="/assets/agents.js?v=20261028-capture-settings-v1" defer></script>
+  </body>
+</html>

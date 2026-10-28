@@ -21,6 +21,7 @@
     "Local knowledge base": "本地知识库",
     "Account settings": "账户设置",
     "Memory maintenance settings": "记忆整理设置",
+    "Agent 接入与记忆路由": "Agent connections & memory routing",
     "PROJECT SETTINGS": "项目设置",
     "Set when the agent should review memories. Either condition can trigger a review. Codex memory maintenance must be enabled.": "设置 agent 何时整理记忆。任一条件达到时都会触发整理；还需在 Codex 中启用记忆整理。",
     "Review after": "间隔",

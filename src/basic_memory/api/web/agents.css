@@ -1,0 +1,37 @@
+.agents-page { overflow: auto; background: #f8f7f4; color: #343d31; }
+.agents-shell { width: min(1060px, calc(100% - 40px)); margin: 44px auto 64px; }
+.agents-back { color: #57735b; text-decoration: none; font-size: 13px; }
+.agents-title-row { display:flex; align-items:center; justify-content:space-between; gap:20px; margin-top:28px; }
+.agents-title-row h1 { margin:5px 0 0; font-size:32px; letter-spacing:-.04em; }
+.agents-intro { max-width:760px; color:#74786f; line-height:1.7; font-size:14px; }
+.agents-notice { display:flex; gap:14px; align-items:flex-start; margin:22px 0; padding:15px 18px; border:1px solid #e8dfc6; border-radius:12px; background:#fffaf0; color:#6e684f; font-size:12px; line-height:1.7; }
+.agents-notice strong { flex:none; color:#635a3d; }
+.agents-summary { display:flex; gap:12px; margin:24px 0; }
+.agents-summary div { display:flex; align-items:baseline; gap:8px; min-width:150px; padding:12px 16px; border:1px solid #e9e8e1; border-radius:12px; background:white; }
+.agents-summary strong { color:#405b45; font-size:18px; }
+.agents-summary span { color:#81847c; font-size:11px; }
+.agents-list { display:grid; gap:14px; }
+.agent-card { padding:20px; border:1px solid #e8e7df; border-radius:14px; background:#fff; box-shadow:0 4px 18px #30351a08; }
+.agent-card-head { display:flex; align-items:center; gap:12px; margin-bottom:18px; }
+.agent-card-head input { flex:1; min-width:120px; font-weight:650; font-size:16px; }
+.agent-status { border:1px solid #dedfd7; border-radius:8px; padding:8px 10px; background:#fff; color:#52614f; }
+.agent-fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.agent-field { display:grid; gap:5px; color:#777b71; font-size:11px; }
+.agent-field input,.agent-field textarea,.agent-field select { width:100%; box-sizing:border-box; border:1px solid #e6e6df; border-radius:8px; padding:9px 10px; background:#fdfdfb; color:#373d34; font-family:inherit; font-size:12px; line-height:1.5; }
+.agent-field textarea { min-height:58px; resize:vertical; }
+.agent-field-wide { grid-column:1/-1; }
+.agent-card-actions { display:flex; justify-content:flex-end; margin-top:12px; }
+.agent-remove { border:0; background:none; color:#a65e53; font-size:11px; cursor:pointer; }
+.agents-footer { display:flex; align-items:center; gap:16px; margin-top:20px; }
+.agents-footer #save-status { color:#85877f; font-size:11px; }
+.agents-footnote { margin-top:22px; color:#8a8c84; font-size:11px; line-height:1.6; }
+.agents-footnote code { color:#5b6658; }
+@media(max-width:650px) {
+  .agents-shell { width:calc(100% - 28px); margin-top:24px; }
+  .agents-title-row h1 { font-size:25px; }
+  .agents-summary { flex-wrap:wrap; }
+  .agents-summary div { flex:1; min-width:110px; }
+  .agent-fields { grid-template-columns:1fr; }
+  .agent-field-wide { grid-column:auto; }
+  .agents-notice { flex-direction:column; gap:4px; }
+}

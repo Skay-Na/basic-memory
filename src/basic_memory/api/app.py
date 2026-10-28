@@ -117,6 +117,14 @@ async def serve_web_app() -> FileResponse:
 app.add_api_route("/", serve_web_app, methods=["GET"], include_in_schema=False)
 
 
+async def serve_agent_routing() -> FileResponse:
+    """Serve the user-maintained agent connection and memory-routing registry."""
+    return FileResponse(_web_assets / "agents.html")
+
+
+app.add_api_route("/agents", serve_agent_routing, methods=["GET"], include_in_schema=False)
+
+
 async def serve_local_account_info() -> HTMLResponse:
     """Explain that login settings belong to the authenticated deployment gateway."""
     return HTMLResponse(
