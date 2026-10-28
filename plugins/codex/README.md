@@ -129,7 +129,10 @@ clear, descriptive, searchable, and supported by the note. Generic, opaque, or
 misleading titles should be corrected in frontmatter and the first H1 while
 preserving the file path, permalink, relations, and body facts. Good titles stay
 unchanged. Defaults are 20 distinct changed notes or 14 days, with batches capped
-at 20 notes.
+at 20 notes. An acknowledgement covers one whole batch: it sends the batch's
+`after_position` as `expected_after_position`, its `through_position`, and every
+reviewed note ID exactly once. If any note cannot be reviewed safely, the agent
+sends no acknowledgement so the checkpoint stays unchanged for a later turn.
 Set `basicMemory.memoryMaintenance` to JSON `true` to have each user turn check
 status after the current request has been handled. When a bounded batch is due,
 the current agent silently curates it before its final reply; it does not send a

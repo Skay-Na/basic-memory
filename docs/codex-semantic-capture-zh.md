@@ -66,7 +66,7 @@ Codex 插件可选启用 `basicMemory.memoryMaintenance: true`。UserPromptSubmi
 当前 agent 在本轮最终回复前自行审阅和写回，不向对话发送整理计划或请求常规确认。整理批次有上限，
 因此会增加触发该批次的回合耗时；没有活跃 Codex 回合时不会在后台运行。除内容、来源、范围、关系和标签外，还逐篇核对标题是否具体、准确、可检索，
 是否只是 UUID、时间戳、路径或泛化收件箱名称；不合格时依据正文修正 frontmatter 标题和首个 H1，
-保留文件路径、permalink 与关系，已有合格标题则不改。完成后确认对应 `through_position`。该流程不在 Stop 中阻塞当前回答，
+保留文件路径、permalink 与关系，已有合格标题则不改。完成后以状态响应中的 `after_position` 作为 `expected_after_position`，连同 `through_position` 和覆盖整批、不重复的 `reviewed_note_ids` 提交一次完成请求；若某篇无法安全整理，则本轮不提交，检查点保持不变并留待后续重试。该流程不在 Stop 中阻塞当前回答，
 也不启动独立后台模型；由当前 agent 在正常回合内完成。默认关闭。删除、自动覆盖
 和多 agent 并发领取不在当前实现范围内。
 
