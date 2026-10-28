@@ -60,9 +60,14 @@ def settings(cwd: Path) -> dict[str, object]:
     enabled = result.get("semanticCapture", True)
     if not isinstance(enabled, bool):
         raise ValueError("semanticCapture must be a JSON boolean")
+    interval = result.get("semanticCaptureInterval", 1)
+    if type(interval) is not int or not 1 <= interval <= 100:
+        raise ValueError("semanticCaptureInterval must be an integer between 1 and 100")
     maintenance = result.get("memoryMaintenance", False)
     if not isinstance(maintenance, bool):
         raise ValueError("memoryMaintenance must be a JSON boolean")
+    if result.get("stateBackend", "local") not in {"local", "remote"}:
+        raise ValueError("stateBackend must be local or remote")
     return result
 
 
@@ -84,6 +89,21 @@ def connect() -> sqlite3.Connection:
         retry_after REAL NOT NULL DEFAULT 0, created REAL NOT NULL, updated REAL NOT NULL,
         UNIQUE(session_id, turn_id)
     )""")
+    db.execute("""CREATE TABLE IF NOT EXISTS capture_turns (
+        session_id TEXT NOT NULL, turn_id TEXT NOT NULL, created REAL NOT NULL,
+        PRIMARY KEY(session_id, turn_id)
+    )""")
+    if "remote_ordinal" not in {
+        row["name"] for row in db.execute("PRAGMA table_info(capture_turns)")
+    }:
+        db.execute("ALTER TABLE capture_turns ADD COLUMN remote_ordinal INTEGER")
+    db.execute("""CREATE TABLE IF NOT EXISTS capture_outbox (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT, cwd TEXT NOT NULL, project TEXT NOT NULL,
+        action TEXT NOT NULL, payload TEXT NOT NULL, review_id TEXT, created REAL NOT NULL
+    )""")
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS capture_settings_cache (project TEXT PRIMARY KEY, interval INTEGER NOT NULL)"
+    )
     now = time.time()
     db.execute(
         "UPDATE reviews SET status='expired', receipt='{}', transcript='', updated=? "
@@ -94,8 +114,158 @@ def connect() -> sqlite3.Connection:
         "DELETE FROM reviews WHERE status IN ('saved','no_memory','expired') AND updated < ?",
         (now - 30 * 24 * 3600,),
     )
+    db.execute("DELETE FROM capture_turns WHERE created < ?", (now - 30 * 24 * 3600,))
+    expired = db.execute(
+        "SELECT DISTINCT review_id FROM capture_outbox WHERE action!='expired' AND review_id IS NOT NULL AND created<?",
+        (now - RETENTION_SECONDS,),
+    ).fetchall()
+    for row in expired:
+        db.execute(
+            "UPDATE reviews SET status='expired',receipt='{}',transcript='',updated=? WHERE id=?",
+            (now, row["review_id"]),
+        )
+        db.execute(
+            "UPDATE capture_outbox SET action='expired',payload='{}' WHERE review_id=?",
+            (row["review_id"],),
+        )
     db.commit()
     return db
+
+
+def enqueue(
+    db: sqlite3.Connection,
+    cwd: Path,
+    project: str,
+    action: str,
+    payload: dict[str, object],
+    review_id: str | None = None,
+) -> None:
+    if settings(cwd).get("stateBackend", "local") == "remote":
+        db.execute(
+            "INSERT INTO capture_outbox(cwd,project,action,payload,review_id,created) VALUES(?,?,?,?,?,?)",
+            (
+                str(cwd),
+                project,
+                action,
+                json.dumps(payload, ensure_ascii=False),
+                review_id,
+                time.time(),
+            ),
+        )
+
+
+def flush_state(cwd: Path, project: str) -> None:
+    config = settings(cwd)
+    if config.get("stateBackend", "local") != "remote":
+        return
+    try:
+        from session_end_capture import StreamableHttpClient
+        import session_end_capture
+
+        session_end_capture.REQUEST_TIMEOUT_SECONDS = 2
+        client = StreamableHttpClient(str(config["remoteMcpUrl"]))
+        client.request(
+            "initialize",
+            {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": "basic-memory-codex-state", "version": "1"},
+            },
+        )
+        client.notify("notifications/initialized")
+        scope = hashlib.sha256(str(cwd).encode()).hexdigest()
+        with closing(connect()) as db:
+            rows = db.execute(
+                "SELECT * FROM capture_outbox WHERE cwd=? AND project=? AND action!='expired' ORDER BY seq LIMIT 3",
+                (str(cwd), project),
+            ).fetchall()
+        for row in rows:
+            payload = json.loads(row["payload"])
+            args = {"agent": "codex", "project": project, "scope": scope}
+            if row["action"] == "turn":
+                args.update(payload)
+                name = "bm_capture_turn"
+            else:
+                args.update({"action": row["action"], "payload": payload})
+                name = "bm_capture_review"
+            response = client.request("tools/call", {"name": name, "arguments": args})
+            if response.get("isError"):
+                raise ValueError("Remote state request failed")
+            value = response.get("structuredContent", {})
+            if row["action"] == "start" and value.get("id") != payload["review_id"]:
+                raise ValueError("Remote review identifier mismatch")
+            with closing(connect()) as db:
+                if (
+                    row["action"] == "turn"
+                    and type(value.get("interval")) is int
+                    and 1 <= value["interval"] <= 100
+                ):
+                    db.execute(
+                        "INSERT INTO capture_settings_cache(project,interval) VALUES(?,?) ON CONFLICT(project) DO UPDATE SET interval=excluded.interval",
+                        (project, value["interval"]),
+                    )
+                if (
+                    row["action"] == "turn"
+                    and type(value.get("turn_count")) is int
+                    and value["turn_count"] > 0
+                ):
+                    db.execute(
+                        "UPDATE capture_turns SET remote_ordinal=? WHERE session_id=? AND turn_id=?",
+                        (value["turn_count"], payload["session"], payload["turn"]),
+                    )
+                db.execute("DELETE FROM capture_outbox WHERE seq=?", (row["seq"],))
+                db.commit()
+        response = client.request(
+            "tools/call",
+            {
+                "name": "bm_capture_review",
+                "arguments": {
+                    "agent": "codex",
+                    "project": project,
+                    "scope": scope,
+                    "action": "pending",
+                    "payload": {},
+                },
+            },
+        )
+        if response.get("isError"):
+            raise ValueError("Remote pending request failed")
+        remote = response.get("structuredContent", {})
+        if not isinstance(remote.get("reviews"), list):
+            raise ValueError("Invalid remote pending response")
+        with closing(connect()) as db:
+            for item in remote["reviews"]:
+                if (
+                    not isinstance(item, dict)
+                    or item.get("status") not in ("pending", "unresolved")
+                    or not isinstance(item.get("data"), dict)
+                ):
+                    raise ValueError("Invalid remote review")
+                receipt = {"status": item["status"], **item["data"]}
+                if item["status"] == "unresolved" and isinstance(item["data"].get("prompt"), str):
+                    receipt["source_prompt"] = item["data"]["prompt"]
+                db.execute(
+                    "INSERT OR IGNORE INTO reviews(id,session_id,turn_id,cwd,project,transcript,status,receipt,attempts,retry_after,created,updated) VALUES(?,?,?,?,?,'',?,?,?,?,?,?)",
+                    (
+                        item["id"],
+                        item["session"],
+                        item["turn"],
+                        str(cwd),
+                        project,
+                        item["status"],
+                        json.dumps(receipt, ensure_ascii=False),
+                        item.get("attempts", 0),
+                        0,
+                        item.get("created", time.time()),
+                        time.time(),
+                    ),
+                )
+            db.commit()
+    except Exception as error:
+        print(
+            f"Basic Memory state synchronization deferred ({type(error).__name__}).",
+            file=sys.stderr,
+        )
 
 
 def ensure_review(
@@ -107,7 +277,7 @@ def ensure_review(
         raise ValueError("missing session_id or turn_id")
     key = hashlib.sha256(f"{session}\0{turn}".encode()).hexdigest()[:32]
     stamp = time.time()
-    db.execute(
+    inserted = db.execute(
         "INSERT OR IGNORE INTO reviews(id,session_id,turn_id,cwd,project,transcript,"
         "created,updated) VALUES (?,?,?,?,?,?,?,?)",
         (
@@ -121,15 +291,36 @@ def ensure_review(
             stamp,
         ),
     )
+    if inserted.rowcount:
+        enqueue(
+            db,
+            cwd,
+            project,
+            "start",
+            {
+                "review_id": key,
+                "session": session,
+                "turn": turn,
+                "data": {"prompt": text_field(payload, "prompt")[:12000]},
+            },
+            key,
+        )
     db.commit()
     return db.execute("SELECT * FROM reviews WHERE id=?", (key,)).fetchone()
 
 
-def context(review_id: str, pending: list[str], maintenance_enabled: bool) -> str:
+def context(
+    review_id: str, pending: list[str], maintenance_enabled: bool, interval: int = 1
+) -> str:
     command = shlex.join([sys.executable, str(Path(__file__).resolve())])
     return (
         f"[basic-memory-review:{review_id}]\n"
-        "在本轮最终回复前，使用 codex:bm-capture 技能检查用户确认的长期事实、偏好、约束与决策。"
+        + (
+            f"本次为批量检查，请结合当前会话最近 {interval} 轮用户交流及其结果提炼，避免遗漏前几轮。\n"
+            if interval > 1
+            else ""
+        )
+        + "在本轮最终回复前，使用 codex:bm-capture 技能检查用户确认的长期事实、偏好、约束与决策。"
         "结合上下文补全指代；不依赖关键词，不因消息或回复长而跳过。"
         "先搜索并核对已有笔记；本轮已保存的内容不要重复写入。"
         "没有持久信息时无需写笔记，但仍须提交 no_memory 回执。"
@@ -148,7 +339,7 @@ def context(review_id: str, pending: list[str], maintenance_enabled: bool) -> st
         + (
             "记忆整理已启用。先正常处理本轮用户请求；在最终答复前静默调用 bm_memory_maintenance 的 status。"
             "若 due=true，直接自动整理返回的有界批次，不要向用户发送整理计划、逐项进度或请求常规整理确认；"
-            "逐篇检查标题是否准确、具体、能概括正文且便于检索；"
+            "若 due=true，只整理返回批次中的笔记，并逐篇检查标题是否准确、具体、能概括正文且便于检索；"
             "标题必须脱离对话上下文也能看出主题，使用简洁主题短语；不能直接复制或截断用户请求、回答开头或会话摘要；"
             "空标题、Untitled、UUID/时间戳/文件名堆砌、泛化收件箱标题或与正文不符的标题都要修正。"
             "标题修正应使用正文证据，保持简洁描述性，通常不超过 80 个字符；同步 frontmatter title 与首个 H1，"
@@ -186,22 +377,103 @@ def handle_hook(verb: str, payload: dict[str, object]) -> dict[str, object]:
                 return {}
         if verb == "stop" and payload.get("stop_hook_active") is True:
             # This guard must survive changed turn IDs on host continuations.
+            abandoned = db.execute(
+                "SELECT id,cwd,project,session_id,turn_id FROM reviews WHERE session_id=? AND status IN ('collecting','requested')",
+                (text_field(payload, "session_id"),),
+            ).fetchall()
             db.execute(
                 "UPDATE reviews SET status='unresolved',updated=? "
                 "WHERE session_id=? AND status IN ('collecting','requested')",
                 (time.time(), text_field(payload, "session_id")),
             )
+            for old in abandoned:
+                enqueue(
+                    db,
+                    Path(old["cwd"]),
+                    old["project"],
+                    "start",
+                    {"review_id": old["id"], "session": old["session_id"], "turn": old["turn_id"]},
+                    old["id"],
+                )
+                enqueue(
+                    db, Path(old["cwd"]), old["project"], "unresolved", {"id": old["id"]}, old["id"]
+                )
             db.commit()
             return {}
+        interval = config.get("semanticCaptureInterval", 1)
+        if config.get("stateBackend", "local") == "remote":
+            cached = db.execute(
+                "SELECT interval FROM capture_settings_cache WHERE project=?", (project,)
+            ).fetchone()
+            if cached is not None:
+                interval = cached["interval"]
+        if verb == "prompt":
+            session = text_field(payload, "session_id")
+            turn = text_field(payload, "turn_id")
+            if not session or not turn:
+                raise ValueError("missing session_id or turn_id")
+            inserted = db.execute(
+                "INSERT OR IGNORE INTO capture_turns(session_id,turn_id,created) VALUES (?,?,?)",
+                (session, turn, time.time()),
+            )
+            if inserted.rowcount:
+                enqueue(
+                    db,
+                    cwd,
+                    project,
+                    "turn",
+                    {"session": session, "turn": turn, "interval": interval},
+                )
+            count = db.execute(
+                "SELECT count(*) FROM capture_turns WHERE session_id=?", (session,)
+            ).fetchone()[0]
+            db.commit()
+            if config.get("stateBackend", "local") == "remote":
+                flush_state(cwd, project)
+                cached = db.execute(
+                    "SELECT interval FROM capture_settings_cache WHERE project=?", (project,)
+                ).fetchone()
+                remote_count = db.execute(
+                    "SELECT remote_ordinal FROM capture_turns WHERE session_id=? AND turn_id=?",
+                    (session, turn),
+                ).fetchone()
+                if cached is not None:
+                    interval = cached["interval"]
+                if remote_count is not None and remote_count["remote_ordinal"] is not None:
+                    count = remote_count["remote_ordinal"]
+            if count % interval:
+                return {}
+        else:
+            key = hashlib.sha256(
+                f"{text_field(payload, 'session_id')}\0{text_field(payload, 'turn_id')}".encode()
+            ).hexdigest()[:32]
+            if db.execute("SELECT 1 FROM reviews WHERE id=?", (key,)).fetchone() is None:
+                return {}
         review = ensure_review(db, payload, cwd, project)
         if verb == "prompt":
             # A genuine new user prompt supersedes an unfinished pass in this
             # chat. Synthetic Stop prompts were handled above.
+            old_reviews = db.execute(
+                "SELECT id,cwd,project,session_id,turn_id FROM reviews WHERE session_id=? AND id<>? AND status IN ('collecting','requested')",
+                (text_field(payload, "session_id"), review["id"]),
+            ).fetchall()
             db.execute(
                 "UPDATE reviews SET status='unresolved',updated=? "
                 "WHERE session_id=? AND id<>? AND status IN ('collecting','requested')",
                 (time.time(), text_field(payload, "session_id"), review["id"]),
             )
+            for old in old_reviews:
+                enqueue(
+                    db,
+                    Path(old["cwd"]),
+                    old["project"],
+                    "start",
+                    {"review_id": old["id"], "session": old["session_id"], "turn": old["turn_id"]},
+                    old["id"],
+                )
+                enqueue(
+                    db, Path(old["cwd"]), old["project"], "unresolved", {"id": old["id"]}, old["id"]
+                )
             db.commit()
         if verb == "prompt":
             pending = [
@@ -213,12 +485,19 @@ def handle_hook(verb: str, payload: dict[str, object]) -> dict[str, object]:
                     (str(cwd), project, review["id"], time.time()),
                 )
             ]
+            additional = context(
+                review["id"], pending, bool(config.get("memoryMaintenance", False)), interval
+            )
+            expired_count = db.execute(
+                "SELECT count(*) FROM capture_outbox WHERE cwd=? AND project=? AND action='expired'",
+                (str(cwd), project),
+            ).fetchone()[0]
+            if expired_count:
+                additional += f"有 {expired_count} 条未送达状态操作已过期且内容已清除；不得声称已同步，请告知用户。\n"
             return {
                 "hookSpecificOutput": {
                     "hookEventName": "UserPromptSubmit",
-                    "additionalContext": context(
-                        review["id"], pending, bool(config.get("memoryMaintenance", False))
-                    ),
+                    "additionalContext": additional,
                 }
             }
         # Missing receipts wait for a later prompt in the same scope. Blocking
@@ -228,6 +507,20 @@ def handle_hook(verb: str, payload: dict[str, object]) -> dict[str, object]:
             "WHERE id=? AND status IN ('collecting','requested')",
             (time.time(), review["id"]),
         )
+        if review["status"] in ("collecting", "requested"):
+            enqueue(
+                db,
+                cwd,
+                project,
+                "start",
+                {
+                    "review_id": review["id"],
+                    "session": review["session_id"],
+                    "turn": review["turn_id"],
+                },
+                review["id"],
+            )
+            enqueue(db, cwd, project, "unresolved", {"id": review["id"]}, review["id"])
         db.commit()
         return {}
 
@@ -298,6 +591,32 @@ def record_receipt(review_id: str, value: dict[str, object]) -> dict[str, object
                 review_id,
             ),
         )
+        enqueue(
+            db,
+            Path(row["cwd"]),
+            row["project"],
+            "start",
+            {"review_id": review_id, "session": row["session_id"], "turn": row["turn_id"]},
+            review_id,
+        )
+        for reference in value.get("references", []):
+            enqueue(
+                db,
+                Path(row["cwd"]),
+                row["project"],
+                "ref",
+                {"id": review_id, "reference": reference},
+                review_id,
+            )
+        data = {key: item for key, item in value.items() if key != "status"}
+        enqueue(
+            db,
+            Path(row["cwd"]),
+            row["project"],
+            "complete",
+            {"id": review_id, "status": status, "data": data},
+            review_id,
+        )
         db.commit()
     return {"id": review_id, "status": status}
 
@@ -310,11 +629,22 @@ def main() -> None:
     hook = args.verb in {"prompt", "stop"}
     try:
         if hook:
-            output = handle_hook(args.verb, read_object())
+            payload = read_object()
+            output = handle_hook(args.verb, payload)
+            cwd_text = text_field(payload, "cwd")
+            if cwd_text and Path(cwd_text).is_absolute():
+                cwd = Path(cwd_text).resolve()
+                flush_state(cwd, text_field(settings(cwd), "primaryProject"))
         elif args.verb == "receipt":
             if not args.review_id:
                 raise ValueError("receipt requires review_id")
             output = record_receipt(args.review_id, read_object())
+            with closing(connect()) as db:
+                row = db.execute(
+                    "SELECT cwd,project FROM reviews WHERE id=?", (args.review_id,)
+                ).fetchone()
+            if row is not None:
+                flush_state(Path(row["cwd"]), row["project"])
         else:
             with closing(connect()) as db:
                 if args.verb == "show":

@@ -196,6 +196,220 @@ def test_same_turn_across_sessions_has_independent_receipts(turn):
     assert first != second
 
 
+def test_batch_interval_tracks_distinct_turns_and_stop_does_not_create_reviews(turn):
+    (review.codex_home() / "basic-memory.json").write_text(
+        json.dumps({"basicMemory": {"primaryProject": "main", "semanticCaptureInterval": 5}})
+    )
+    for number in range(1, 5):
+        current = dict(turn, turn_id=str(number))
+        assert review.handle_hook("prompt", current) == {}
+        assert review.handle_hook("prompt", current) == {}
+        assert review.handle_hook("stop", current) == {}
+    output = review.handle_hook("prompt", dict(turn, turn_id="5"))
+    assert "最近 5 轮" in output["hookSpecificOutput"]["additionalContext"]
+    with closing(review.connect()) as db:
+        assert db.execute("SELECT count(*) FROM reviews").fetchone()[0] == 1
+    assert review.handle_hook("prompt", dict(turn, session_id="other", turn_id="1")) == {}
+
+
+def test_remote_outbox_retains_receipts_offline_and_replays(turn, monkeypatch):
+    import session_end_capture
+
+    class Client:
+        offline = True
+        calls = []
+
+        def __init__(self, endpoint):
+            pass
+
+        def notify(self, method):
+            pass
+
+        def request(self, method, params):
+            if self.offline:
+                raise OSError("offline")
+            if method == "initialize":
+                return {}
+            self.calls.append(params)
+            payload = params["arguments"].get("payload", {})
+            if params["arguments"].get("action") == "pending":
+                return {"structuredContent": {"reviews": []}}
+            return {"structuredContent": {"id": payload.get("review_id")}}
+
+    monkeypatch.setattr(session_end_capture, "StreamableHttpClient", Client)
+    (review.codex_home() / "basic-memory.json").write_text(
+        json.dumps(
+            {
+                "basicMemory": {
+                    "primaryProject": "main",
+                    "stateBackend": "remote",
+                    "remoteMcpUrl": "http://127.0.0.1:1/mcp",
+                }
+            }
+        )
+    )
+    key = start(turn)
+    review.record_receipt(key, {"status": "no_memory", "reason": "none"})
+    review.flush_state(Path(turn["cwd"]), "main")
+    with closing(review.connect()) as db:
+        assert db.execute("SELECT count(*) FROM capture_outbox").fetchone()[0] == 4
+    Client.offline = False
+    review.flush_state(Path(turn["cwd"]), "main")
+    review.flush_state(Path(turn["cwd"]), "main")
+    with closing(review.connect()) as db:
+        assert db.execute("SELECT count(*) FROM capture_outbox").fetchone()[0] == 0
+    assert [item["name"] for item in Client.calls] == [
+        "bm_capture_turn",
+        "bm_capture_review",
+        "bm_capture_review",
+        "bm_capture_review",
+        "bm_capture_review",
+        "bm_capture_review",
+    ]
+
+
+def test_remote_pending_can_be_restored_without_local_transcript(turn, monkeypatch):
+    import session_end_capture
+
+    class Client:
+        def __init__(self, endpoint):
+            pass
+
+        def notify(self, method):
+            pass
+
+        def request(self, method, params):
+            if method == "initialize":
+                return {}
+            return {
+                "structuredContent": {
+                    "reviews": [
+                        {
+                            "id": "a" * 32,
+                            "session": "s",
+                            "turn": "t",
+                            "status": "unresolved",
+                            "data": {"prompt": "confirmed user statement"},
+                        }
+                    ]
+                }
+            }
+
+    monkeypatch.setattr(session_end_capture, "StreamableHttpClient", Client)
+    (review.codex_home() / "basic-memory.json").write_text(
+        json.dumps(
+            {
+                "basicMemory": {
+                    "primaryProject": "main",
+                    "stateBackend": "remote",
+                    "remoteMcpUrl": "http://127.0.0.1:1/mcp",
+                }
+            }
+        )
+    )
+    review.flush_state(Path(turn["cwd"]), "main")
+    row = read("a" * 32)
+    assert row["status"] == "unresolved"
+    assert json.loads(row["receipt"])["source_prompt"] == "confirmed user statement"
+
+
+def test_remote_interval_is_cached_and_used_on_later_turn(turn, monkeypatch):
+    import session_end_capture
+
+    class Client:
+        def __init__(self, endpoint):
+            pass
+
+        def notify(self, method):
+            pass
+
+        def request(self, method, params):
+            if method == "initialize":
+                return {}
+            args = params["arguments"]
+            if params["name"] == "bm_capture_turn":
+                return {"structuredContent": {"interval": 2}}
+            if args.get("action") == "pending":
+                return {"structuredContent": {"reviews": []}}
+            return {"structuredContent": {"id": args.get("payload", {}).get("review_id")}}
+
+    monkeypatch.setattr(session_end_capture, "StreamableHttpClient", Client)
+    (review.codex_home() / "basic-memory.json").write_text(
+        json.dumps(
+            {
+                "basicMemory": {
+                    "primaryProject": "main",
+                    "stateBackend": "remote",
+                    "semanticCaptureInterval": 5,
+                    "remoteMcpUrl": "http://127.0.0.1:1/mcp",
+                }
+            }
+        )
+    )
+    assert review.handle_hook("prompt", turn) == {}
+    review.flush_state(Path(turn["cwd"]), "main")
+    output = review.handle_hook("prompt", dict(turn, turn_id="second"))
+    assert "最近 2 轮" in output["hookSpecificOutput"]["additionalContext"]
+
+
+def test_remote_ordinal_restores_batch_after_local_state_loss(turn, monkeypatch):
+    import session_end_capture
+
+    class Client:
+        def __init__(self, endpoint):
+            pass
+
+        def notify(self, method):
+            pass
+
+        def request(self, method, params):
+            if method == "initialize":
+                return {}
+            if params["name"] == "bm_capture_turn":
+                return {"structuredContent": {"interval": 5, "turn_count": 5}}
+            if params["arguments"].get("action") == "pending":
+                return {"structuredContent": {"reviews": []}}
+            return {
+                "structuredContent": {"id": params["arguments"].get("payload", {}).get("review_id")}
+            }
+
+    monkeypatch.setattr(session_end_capture, "StreamableHttpClient", Client)
+    (review.codex_home() / "basic-memory.json").write_text(
+        json.dumps(
+            {
+                "basicMemory": {
+                    "primaryProject": "main",
+                    "stateBackend": "remote",
+                    "semanticCaptureInterval": 5,
+                    "remoteMcpUrl": "http://127.0.0.1:1/mcp",
+                }
+            }
+        )
+    )
+    output = review.handle_hook("prompt", turn)
+    assert "最近 5 轮" in output["hookSpecificOutput"]["additionalContext"]
+
+
+def test_legacy_local_receipt_enqueues_remote_start(turn):
+    review_id = start(turn)
+    (review.codex_home() / "basic-memory.json").write_text(
+        json.dumps(
+            {
+                "basicMemory": {
+                    "primaryProject": "main",
+                    "stateBackend": "remote",
+                    "remoteMcpUrl": "http://127.0.0.1:1/mcp",
+                }
+            }
+        )
+    )
+    review.record_receipt(review_id, {"status": "no_memory", "reason": "none"})
+    with closing(review.connect()) as db:
+        rows = db.execute("SELECT action,payload FROM capture_outbox ORDER BY seq").fetchall()
+    assert [row["action"] for row in rows] == ["start", "complete"]
+    assert json.loads(rows[0]["payload"])["review_id"] == review_id
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
 def test_local_database_is_private(turn):
     start(turn)
